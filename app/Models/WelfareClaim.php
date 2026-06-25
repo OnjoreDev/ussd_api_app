@@ -9,39 +9,52 @@ use PDO;
 class WelfareClaim extends Model
 {
     /**
-     * Inserts a new claim. 
-     * Note: Your database expects a unique tracking_number.
+     * Check if the member has an active (non-disbursed/non-rejected) claim.
      */
-    public function create(int $memberId, string $claimType, string $relationship = 'self'): bool
+    public function hasActiveClaim(int $memberId): bool
     {
-        $trackingNumber = $this->generateTrackingNumber($claimType);
-        
-        $sql = "INSERT INTO welfare_claims 
-                (member_id, claim_type, relationship, tracking_number, status, amount_eligible, notes) 
-                VALUES (?, ?, ?, ?, 'pending_docs', 0.00, '')";
-        
+        $sql = "SELECT COUNT(*) FROM welfare_claims 
+                WHERE member_id = ? 
+                AND status NOT IN ('disbursed', 'rejected')";
         $stmt = $this->pdo->prepare($sql);
-        return $stmt->execute([$memberId, $claimType, $relationship, $trackingNumber]);
+        $stmt->execute([$memberId]);
+        return (int)$stmt->fetchColumn() > 0;
     }
 
     /**
-     * Fetches all claims for a specific member ID.
+     * Create a new welfare claim.
+     */
+    public function create(int $memberId, string $claimType, string $trackingNumber): bool
+    {
+        $sql = "INSERT INTO welfare_claims (member_id, claim_type, tracking_number, status, amount_eligible, notes) 
+                VALUES (?, ?, ?, 'pending_docs', 0.00, 'New claim submitted')";
+        $stmt = $this->pdo->prepare($sql);
+        return $stmt->execute([$memberId, $claimType, $trackingNumber]);
+    }
+
+    /**
+     * Find claims by member ID.
      */
     public function findByMemberId(int $memberId): array
     {
-        $sql = "SELECT tracking_number, status FROM welfare_claims WHERE member_id = ?";
+        $sql = "SELECT * FROM welfare_claims WHERE member_id = ? ORDER BY created_at DESC";
         $stmt = $this->pdo->prepare($sql);
         $stmt->execute([$memberId]);
         return $stmt->fetchAll(PDO::FETCH_ASSOC);
     }
 
     /**
-     * Generates a unique tracking number format (e.g., MED-XXXXX)
+     * Get the latest welfare claim for a member
      */
-    private function generateTrackingNumber(string $claimType): string
+    public function findLatestByMember(int $memberId): ?array
     {
-        $prefix = ($claimType === 'medical') ? 'MED' : 'BER';
-        $random = strtoupper(bin2hex(random_bytes(3))); // Generates 6-char random string
-        return $prefix . '-' . $random;
+        $sql = "SELECT * FROM welfare_claims 
+            WHERE member_id = ? 
+            ORDER BY created_at DESC 
+            LIMIT 1";
+        $stmt = $this->pdo->prepare($sql);
+        $stmt->execute([$memberId]);
+        return $stmt->fetch(PDO::FETCH_ASSOC) ?: null;
     }
+
 }

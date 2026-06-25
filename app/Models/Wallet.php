@@ -26,4 +26,16 @@ class Wallet extends Model
         // - Once for the UPDATE (incrementing balance)
         return $stmt->execute([$memberId, $amount, $amount]);
     }
+    /**
+     * Fetch a specific wallet record for a member by wallet type
+     */
+    public function getWalletByMemberAndType(int $memberId, int $walletTypeId): ?array
+    {
+        $sql = "SELECT * FROM wallets WHERE member_id = ? AND wallet_type_id = ? LIMIT 1";
+        $stmt = $this->pdo->prepare($sql);
+        $stmt->execute([$memberId, $walletTypeId]);
+        
+        $result = $stmt->fetch(PDO::FETCH_ASSOC);
+        return $result ?: null;
+    }
 }

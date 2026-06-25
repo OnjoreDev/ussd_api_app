@@ -11,13 +11,14 @@ class LoanRequest extends Model
     /**
      * Create a new pending loan request
      */
+    // In LoanRequest.php
     public function createPending(int $memberId, int $walletTypeId, int $amount): bool
     {
+        // Now the table has the 'wallet_type_id' column, so this query will succeed
         $stmt = $this->pdo->prepare("
-            INSERT INTO loan_requests (member_id, wallet_type_id, amount, status, approved_by, created_at) 
-            VALUES (?, ?, ?, 'pending', 0, NOW())
-        ");
-
+        INSERT INTO loan_requests (member_id, wallet_type_id, amount, status, approved_by, created_at) 
+        VALUES (?, ?, ?, 'pending', 0, NOW())
+    ");
         return $stmt->execute([$memberId, $walletTypeId, $amount]);
     }
 
@@ -36,7 +37,7 @@ class LoanRequest extends Model
     // }
     public function hasPendingRequest(int $memberId): bool
     {
-        
+
         $stmt = $this->pdo->prepare("
         SELECT COUNT(*) FROM loan_requests 
         WHERE member_id = ? AND status = 'pending'
@@ -69,5 +70,16 @@ class LoanRequest extends Model
 
         // Returns the row as an associative array, or null if no record exists
         return $stmt->fetch(PDO::FETCH_ASSOC) ?: null;
+    }
+
+    /**
+     * Updates the status of a loan request
+     */
+
+    public function updateStatus(int $loanId, string $status, int $adminId): bool
+    {
+        $sql = "UPDATE loan_requests SET status = ?, approved_by = ? WHERE id = ?";
+        $stmt = $this->pdo->prepare($sql);
+        return $stmt->execute([$status, $adminId, $loanId]);
     }
 }
