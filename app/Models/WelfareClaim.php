@@ -24,10 +24,14 @@ class WelfareClaim extends Model
     /**
      * Create a new welfare claim.
      */
+    /**
+     * Create a new welfare claim.
+     * Updated: Relationship column removed.
+     */
     public function create(int $memberId, string $claimType, string $trackingNumber): bool
     {
         $sql = "INSERT INTO welfare_claims (member_id, claim_type, tracking_number, status, amount_eligible, notes) 
-                VALUES (?, ?, ?, 'pending_docs', 0.00, 'New claim submitted')";
+            VALUES (?, ?, ?, 'pending_docs', 0.00, 'New claim submitted')";
         $stmt = $this->pdo->prepare($sql);
         return $stmt->execute([$memberId, $claimType, $trackingNumber]);
     }
@@ -56,5 +60,4 @@ class WelfareClaim extends Model
         $stmt->execute([$memberId]);
         return $stmt->fetch(PDO::FETCH_ASSOC) ?: null;
     }
-
 }

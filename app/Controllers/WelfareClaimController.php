@@ -35,6 +35,8 @@ class WelfareClaimController extends Controller
     /**
      * Processes an atomic deposit into the Welfare Wallet (ID 2).
      */
+    // Inside WelfareClaimController.php
+
     public function deposit(Request $request, Response $response): Response
     {
         $data = $request->getParsedBody();
@@ -46,8 +48,8 @@ class WelfareClaimController extends Controller
             return $this->jsonResponse($response, ['status' => 'error', 'message' => 'Member not found'], 404);
         }
 
-        // Use the TransactionService to ensure atomicity
-        $receipt = 'DEP-WEL-' . strtoupper(bin2hex(random_bytes(4)));
+        // Generate unique reference string
+        $reference = 'DEP-WEL-' . strtoupper(bin2hex(random_bytes(4)));
 
         $success = $this->transactionService->execute(
             (int) $user['id'],
@@ -55,7 +57,7 @@ class WelfareClaimController extends Controller
             $amount,
             'Credit',
             'Welfare Deposit via USSD',
-            $receipt
+            $reference
         );
 
         if ($success) {
@@ -90,7 +92,6 @@ class WelfareClaimController extends Controller
             return $this->jsonResponse($response, ['status' => 'error', 'message' => 'Member not found'], 404);
         }
 
-        // Enforce "One Active Claim" rule
         if ($this->welfareClaim->hasActiveClaim((int) $user['id'])) {
             return $this->jsonResponse($response, [
                 'status' => 'error',
@@ -99,6 +100,8 @@ class WelfareClaimController extends Controller
         }
 
         $tracking = 'CLM-' . strtoupper(bin2hex(random_bytes(3)));
+
+        // No longer passing relationship here
         $success = $this->welfareClaim->create((int) $user['id'], $data['claim_type'], $tracking);
 
         if ($success) {

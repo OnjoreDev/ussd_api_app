@@ -12,14 +12,28 @@ class Transaction extends Model
      * Records a new movement in the ledger.
      */
     // In App\Models\Transaction.php
+    // In App\Models\Transaction.php
+
     public function create(array $data): bool
     {
         $sql = "INSERT INTO transactions 
-            (member_id, wallet_type_id, type, debit, credit, previous_balance, running_balance, status, payment_receipt, description) 
-            VALUES (:member_id, :wallet_type_id, :type, :debit, :credit, :previous_balance, :running_balance, 'Completed', :payment_receipt, :description)";
+        (member_id, wallet_type_id, type, amount, previous_balance, running_balance, currency, reference, description) 
+        VALUES (:member_id, :wallet_type_id, :type, :amount, :previous_balance, :running_balance, :currency, :reference, :description)";
 
         $stmt = $this->pdo->prepare($sql);
-        return $stmt->execute($data);
+
+        // Ensure the $data array passed to this function contains exactly these keys
+        return $stmt->execute([
+            'member_id'        => $data['member_id'],
+            'wallet_type_id'   => $data['wallet_type_id'],
+            'type'             => $data['type'],
+            'amount'           => $data['amount'],
+            'previous_balance' => $data['previous_balance'],
+            'running_balance'  => $data['running_balance'],
+            'currency'         => $data['currency'] ?? 'KES',
+            'reference'        => $data['reference'],
+            'description'      => $data['description']
+        ]);
     }
 
     /**
