@@ -22,20 +22,20 @@ class ChamaPointsController extends Controller
     /**
      * Add points to a member's Chama account
      */
-    public function addPoints(Request $request, Response $response): Response
-    {
-        $data = $request->getParsedBody();
-        // 3 = Chama Points Wallet Type
-        $success = $this->transactionService->execute(
-            (int)$data['member_id'],
-            3,
-            (int)$data['amount'],
-            'Credit',
-            'Chama Loyalty Points Earned',
-            'PTS-' . strtoupper(bin2hex(random_bytes(4)))
-        );
+    // public function addPoints(Request $request, Response $response): Response
+    // {
+    //     $data = $request->getParsedBody();
+    //     // 3 = Chama Points Wallet Type
+    //     $success = $this->transactionService->execute(
+    //         (int)$data['member_id'],
+    //         3,
+    //         (int)$data['amount'],
+    //         'Credit',
+    //         'Chama Loyalty Points Earned',
+    //         'PTS-' . strtoupper(bin2hex(random_bytes(4)))
+    //     );
 
-        return $success ? $this->jsonResponse($response, ['status' => 'success']) 
-                        : $this->jsonResponse($response, ['status' => 'error'], 500);
-    }
+    //     return $success ? $this->jsonResponse($response, ['status' => 'success']) 
+    //                     : $this->jsonResponse($response, ['status' => 'error'], 500);
+    // }
 }
