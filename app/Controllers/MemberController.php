@@ -89,52 +89,55 @@ class MemberController extends Controller
         ]);
     }
 
+    // Inside App\Controllers\MemberController.php
+
     public function findByPhone(Request $request, Response $response): Response
     {
-        $routeContext = RouteContext::fromRequest($request);
+        $routeContext = \Slim\Routing\RouteContext::fromRequest($request);
         $args = $routeContext->getRoute()->getArguments();
         $phone = $args['phone'] ?? '';
 
-        $member = $this->member->findByPhone($phone); // Uses your Member model
+        $member = $this->member->findByPhone($phone);
 
         if (!$member) {
             $response->getBody()->write(json_encode(['status' => 'error', 'message' => 'Not found']));
             return $response->withStatus(404)->withHeader('Content-Type', 'application/json');
         }
 
-        $response->getBody()->write(json_encode(['status' => 'success', 'data' => $member]));
+        // Return the record directly (flat structure)
+        $response->getBody()->write(json_encode($member));
         return $response->withHeader('Content-Type', 'application/json');
     }
 
-   // App\Controllers\MemberController.php
+    // App\Controllers\MemberController.php
 
-public function getBalances(Request $request, Response $response): Response
-{
-    $params = $request->getQueryParams();
-    $phone = $params['phone'] ?? '';
+    public function getBalances(Request $request, Response $response): Response
+    {
+        $params = $request->getQueryParams();
+        $phone = $params['phone'] ?? '';
 
-    // 1. Logic Delegation: Call Model to find user
-    $user = $this->member->findByPhone($phone);
-    if (!$user) {
-        return $this->jsonResponse($response, ['status' => 'error', 'message' => 'Member not found'], 404);
-    }
-
-    // 2. Logic Delegation: Call Model to get wallets
-    $wallets = $this->member->getWalletsByMemberId((int)$user['id']);
-
-    // 3. Optional: Trigger SMS Notification for balances
-    if (!empty($wallets)) {
-        $msg = "Your Jua Kali CBO Account Balances:\n";
-        foreach ($wallets as $w) {
-            $symbol = ($w['wallet_name'] === 'chama points') ? 'Pts' : 'KES';
-            $msg .= ucfirst($w['wallet_name']) . ": {$symbol} " . number_format((float)$w['balance'], 2) . "\n";
+        // 1. Logic Delegation: Call Model to find user
+        $user = $this->member->findByPhone($phone);
+        if (!$user) {
+            return $this->jsonResponse($response, ['status' => 'error', 'message' => 'Member not found'], 404);
         }
-        $this->smsService->sendSMS($phone, $msg);
-    }
 
-    return $this->jsonResponse($response, [
-        'status' => 'success',
-        'wallets' => $wallets
-    ]);
-}
+        // 2. Logic Delegation: Call Model to get wallets
+        $wallets = $this->member->getWalletsByMemberId((int)$user['id']);
+
+        // 3. Optional: Trigger SMS Notification for balances
+        if (!empty($wallets)) {
+            $msg = "Your Jua Kali CBO Account Balances:\n";
+            foreach ($wallets as $w) {
+                $symbol = ($w['wallet_name'] === 'chama points') ? 'Pts' : 'KES';
+                $msg .= ucfirst($w['wallet_name']) . ": {$symbol} " . number_format((float)$w['balance'], 2) . "\n";
+            }
+            $this->smsService->sendSMS($phone, $msg);
+        }
+
+        return $this->jsonResponse($response, [
+            'status' => 'success',
+            'wallets' => $wallets
+        ]);
+    }
 }

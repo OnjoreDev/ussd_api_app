@@ -14,15 +14,19 @@ class Transaction extends Model
     // In App\Models\Transaction.php
     // In App\Models\Transaction.php
 
+    // In App\Models\Transaction.php
+
+    // Inside App\Models\Transaction.php
+
     public function create(array $data): bool
     {
+        // Table columns: member_id, wallet_type_id, type, amount, previous_balance, running_balance, reference, description
         $sql = "INSERT INTO transactions 
-        (member_id, wallet_type_id, type, amount, previous_balance, running_balance, currency, reference, description) 
-        VALUES (:member_id, :wallet_type_id, :type, :amount, :previous_balance, :running_balance, :currency, :reference, :description)";
+        (member_id, wallet_type_id, type, amount, previous_balance, running_balance, reference, description) 
+        VALUES (:member_id, :wallet_type_id, :type, :amount, :previous_balance, :running_balance, :reference, :description)";
 
         $stmt = $this->pdo->prepare($sql);
 
-        // Ensure the $data array passed to this function contains exactly these keys
         return $stmt->execute([
             'member_id'        => $data['member_id'],
             'wallet_type_id'   => $data['wallet_type_id'],
@@ -30,11 +34,11 @@ class Transaction extends Model
             'amount'           => $data['amount'],
             'previous_balance' => $data['previous_balance'],
             'running_balance'  => $data['running_balance'],
-            'currency'         => $data['currency'] ?? 'KES',
-            'reference'        => $data['reference'],
+            'reference'        => $data['reference'], // MUST match the key passed in TransactionService
             'description'      => $data['description']
         ]);
     }
+    
 
     /**
      * Locks a wallet row for an atomic update (prevents race conditions).

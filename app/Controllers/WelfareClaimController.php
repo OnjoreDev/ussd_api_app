@@ -12,6 +12,7 @@ use App\Services\SmsService;
 use Psr\Container\ContainerInterface;
 use Psr\Http\Message\ResponseInterface as Response;
 use Psr\Http\Message\ServerRequestInterface as Request;
+use Exception;
 
 class WelfareClaimController extends Controller
 {
@@ -43,29 +44,44 @@ class WelfareClaimController extends Controller
         $phone = $data['phone'] ?? '';
         $amount = (int) ($data['amount'] ?? 0);
 
+        // 1. Basic Validation
+        if ($amount <= 0) {
+            return $this->jsonResponse($response, ['status' => 'error', 'message' => 'Invalid amount'], 400);
+        }
+
         $user = $this->member->findByPhone($phone);
         if (!$user) {
             return $this->jsonResponse($response, ['status' => 'error', 'message' => 'Member not found'], 404);
         }
 
-        // Generate unique reference string
+        // 2. Generate unique reference
         $reference = 'DEP-WEL-' . strtoupper(bin2hex(random_bytes(4)));
 
-        $success = $this->transactionService->execute(
-            (int) $user['id'],
-            2, // Welfare Wallet Type ID
-            $amount,
-            'Credit',
-            'Welfare Deposit via USSD',
-            $reference
-        );
+        try {
+            // 3. Execute via Service
+            // Note: I've updated the call to match the logic where the service 
+            // handles the calculation and balance updates internally.
+            $this->transactionService->execute(
+                (int) $user['id'],
+                2, // Welfare Wallet Type ID
+                $amount,
+                $reference,
+                'Welfare Deposit via USSD'
+            );
 
-        if ($success) {
+            // 4. Send Success SMS
             $this->smsService->sendSMS($phone, "Success: KES {$amount} credited to your Welfare Wallet.");
-            return $this->jsonResponse($response, ['status' => 'success']);
-        }
 
-        return $this->jsonResponse($response, ['status' => 'error', 'message' => 'Deposit failed'], 500);
+            return $this->jsonResponse($response, ['status' => 'success', 'message' => 'Deposit successful']);
+        } catch (Exception $e) {
+            // Log the actual error for debugging
+            $this->logger->error("Deposit failed: " . $e->getMessage());
+
+            return $this->jsonResponse($response, [
+                'status' => 'error',
+                'message' => 'Deposit failed: ' . $e->getMessage()
+            ], 500);
+        }
     }
 
     // Add to WelfareClaimController.php

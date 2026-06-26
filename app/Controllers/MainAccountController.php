@@ -10,6 +10,7 @@ use App\Services\SmsService;
 use Psr\Container\ContainerInterface;
 use Psr\Http\Message\ResponseInterface as Response;
 use Psr\Http\Message\ServerRequestInterface as Request;
+use Exception;
 
 class MainAccountController extends Controller
 {
@@ -28,39 +29,44 @@ class MainAccountController extends Controller
     public function deposit(Request $request, Response $response): Response
     {
         $data = $request->getParsedBody();
-        $memberId = (int)$data['member_id'];
-        $amount = (int)$data['amount'];
+        $memberId = (int)($data['member_id'] ?? 0);
+        $amount = (int)($data['amount'] ?? 0);
 
-        // 1 = Main Wallet Type
+        // 1. Basic Validation
+        if ($memberId <= 0 || $amount <= 0) {
+            return $this->jsonResponse($response, ['status' => 'error', 'message' => 'Invalid input'], 400);
+        }
+
+        // 2. Generate unique reference
         $receipt = 'MAIN-' . strtoupper(bin2hex(random_bytes(4)));
-        
-        $success = $this->transactionService->execute(
-            $memberId,
-            1,
-            $amount,
-            'Credit',
-            'General Main Account Deposit',
-            $receipt
-        );
 
-        if ($success) {
-            // Retrieve member details to get phone number
+        try {
+            // 3. Execute via Service (using creditWallet for atomic integrity)
+            $this->transactionService->execute(
+                $memberId,
+                1, // Main Wallet Type ID
+                $amount,
+                $receipt,
+                'General Main Account Deposit'
+            );
+
+            // 4. Post-transaction handling
             $member = $this->member->findById($memberId);
-            
             if ($member && !empty($member['phone'])) {
-                // Fetch current balance using defined model method
+                // Fetch updated balance for SMS notification
                 $balance = $this->getMainWalletBalance($memberId);
-                
+
                 $message = "Deposit Success: KES $amount credited to your Main Account. New Balance: KES $balance. Receipt: $receipt";
                 $this->smsService->sendSMS($member['phone'], $message);
             }
 
             return $this->jsonResponse($response, ['status' => 'success']);
+        } catch (Exception $e) {
+            // Log error and return failure
+            error_log("Main Deposit Failed: " . $e->getMessage());
+            return $this->jsonResponse($response, ['status' => 'error', 'message' => 'Deposit failed'], 500);
         }
-
-        return $this->jsonResponse($response, ['status' => 'error'], 500);
     }
-
     /**
      * Helper to find Main Account (Type 1) balance from member's wallets
      */
