@@ -93,7 +93,7 @@ class MemberController extends Controller
 
     public function findByPhone(Request $request, Response $response): Response
     {
-        $routeContext = \Slim\Routing\RouteContext::fromRequest($request);
+        $routeContext = RouteContext::fromRequest($request);
         $args = $routeContext->getRoute()->getArguments();
         $phone = $args['phone'] ?? '';
 
