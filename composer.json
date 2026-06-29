@@ -16,6 +16,7 @@
 		"ext-redis": "*",
 		"brick/db": "^0.3.0",
 		"cocur/slugify": "^4.6",
+		"guzzlehttp/guzzle": "^7.12",
 		"league/csv": "^9.23",
 		"monolog/monolog": "^2.8",
 		"php-di/php-di": "^6.4",

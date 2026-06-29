@@ -11,6 +11,8 @@ use App\Controllers\WithdrawalController;
 use App\Controllers\MainAccountController;
 use App\Controllers\ChamaPointsController;
 use App\Middleware\AuthMiddleware;
+use App\Controllers\MpesaResponseController;
+use App\Controllers\MpesaController;
 use Slim\App;
 use Slim\Routing\RouteCollectorProxy;
 
@@ -35,6 +37,9 @@ return function (App $app) {
         // 3. PUBLIC MEMBER OPERATIONS
         $group->get('/member/check-registration/{phone}', [MemberController::class, 'checkRegistration']);
         $group->get('/member/customer-care-details', [MemberController::class, 'getCustomerCareDetails']);
+         
+        //PUBLIC MPESA ROUTE
+        $group->post('/payment-hook', [MpesaResponseController::class, 'handleCallback']);
 
         // 4. PROTECTED FINANCIAL OPERATIONS (Requires AuthMiddleware)
         $group->group('', function (RouteCollectorProxy $secure) {
@@ -61,6 +66,9 @@ return function (App $app) {
             // Main Account & Chama
             $secure->post('/main/deposit', [MainAccountController::class, 'deposit']);
             $secure->post('/chama/points/add', [ChamaPointsController::class, 'addPoints']);
+
+            //STKPush
+            $secure->post('/mpesa/stk-push', [MpesaController::class, 'initiateStk']);
 
         })->add(AuthMiddleware::class);
     });

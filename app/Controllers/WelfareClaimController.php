@@ -7,6 +7,8 @@ namespace App\Controllers;
 use App\Models\Member;
 use App\Models\Wallet;
 use App\Models\WelfareClaim;
+use App\Models\Mpesa;                  // 1. Import Mpesa Model
+use App\Services\MpesaService;         // 2. Import Mpesa Service
 use App\Services\TransactionService;
 use App\Services\SmsService;
 use Psr\Container\ContainerInterface;
@@ -20,8 +22,9 @@ class WelfareClaimController extends Controller
     private Wallet $wallet;
     private TransactionService $transactionService;
     private SmsService $smsService;
-
     private WelfareClaim $welfareClaim;
+    private MpesaService $mpesaService; // Added
+    private Mpesa $mpesaModel;         // Added
 
     public function __construct(ContainerInterface $container)
     {
@@ -31,59 +34,87 @@ class WelfareClaimController extends Controller
         $this->transactionService = $container->get(TransactionService::class);
         $this->smsService = $container->get(SmsService::class);
         $this->welfareClaim = $container->get(WelfareClaim::class);
+        $this->mpesaService = $container->get(MpesaService::class); // Instantiated
+        $this->mpesaModel = $container->get(Mpesa::class);         // Instantiated
     }
 
     /**
-     * Processes an atomic deposit into the Welfare Wallet (ID 2).
+     * Processes an STK Push initialization deposit into the Welfare Wallet (ID 2).
      */
-    // Inside WelfareClaimController.php
-
+    /**
+     * Processes an STK Push initialization deposit into the Welfare Wallet (ID 2).
+     * This replaces the immediate database balance logic with an asynchronous M-Pesa flow.
+     */
     public function deposit(Request $request, Response $response): Response
     {
         $data = $request->getParsedBody();
-        $phone = $data['phone'] ?? '';
-        $amount = (int) ($data['amount'] ?? 0);
 
-        // 1. Basic Validation
-        if ($amount <= 0) {
-            return $this->jsonResponse($response, ['status' => 'error', 'message' => 'Invalid amount'], 400);
+        // Ensure we capture all necessary payload arguments from the USSD / Utility API wrapper call
+        if (empty($data['phone']) || empty($data['amount']) || empty($data['member_id'])) {
+            return $this->jsonResponse($response, [
+                'status' => 'error', 
+                'message' => 'Missing parameter inputs. phone, amount, and member_id are required.'
+            ], 400);
         }
 
-        $user = $this->member->findByPhone($phone);
-        if (!$user) {
-            return $this->jsonResponse($response, ['status' => 'error', 'message' => 'Member not found'], 404);
-        }
-
-        // 2. Generate unique reference
-        $reference = 'DEP-WEL-' . strtoupper(bin2hex(random_bytes(4)));
+        $phone = (string) $data['phone'];
+        $amount = (float) $data['amount'];
+        $memberId = (int) $data['member_id'];
+        $walletTypeId = 2; // Hardcoded strictly to ID 2 for the Welfare account wallet structure
 
         try {
-            // 3. Execute via Service
-            // Note: I've updated the call to match the logic where the service 
-            // handles the calculation and balance updates internally.
-            $this->transactionService->execute(
-                (int) $user['id'],
-                2, // Welfare Wallet Type ID
-                $amount,
-                $reference,
-                'Welfare Deposit via USSD'
+            $this->logger->info("Initiating Welfare Deposit STK Push via USSD API trigger for Member ID: {$memberId}, Amount: {$amount}");
+
+            // Trigger the Safaricom Daraja Gateway push using all 4 required arguments
+            $stkResult = $this->mpesaService->initiateStkPush(
+                $phone, 
+                $amount, 
+                "Welfare Dep",          // AccountReference (Argument 3)
+                "Welfare Contribution"  // TransactionDesc  (Argument 4)
             );
 
-            // 4. Send Success SMS
-            $this->smsService->sendSMS($phone, "Success: KES {$amount} credited to your Welfare Wallet.");
+            // If Safaricom accepts the request, track it as 'pending' inside the database
+            if (isset($stkResult['ResponseCode']) && $stkResult['ResponseCode'] === "0") {
+                
+                $dbPayload = [
+                    'member_id'           => $memberId,
+                    'wallet_type_id'      => $walletTypeId,
+                    'amount'              => $amount,
+                    'phone_number'        => $phone,
+                    'checkout_request_id' => $stkResult['CheckoutRequestID'],
+                    'merchant_request_id' => $stkResult['MerchantRequestID']
+                ];
 
-            return $this->jsonResponse($response, ['status' => 'success', 'message' => 'Deposit successful']);
-        } catch (Exception $e) {
-            // Log the actual error for debugging
-            $this->logger->error("Deposit failed: " . $e->getMessage());
+                // Persist the transaction into mpesa_transactions table with its native 'pending' flag state
+                $this->mpesaModel->createTransaction($dbPayload);
 
+                return $this->jsonResponse($response, [
+                    'status'  => 'success',
+                    'message' => 'STK Push initiated successfully. Please enter your M-Pesa PIN on your phone.',
+                    'data'    => [
+                        'MerchantRequestID' => $stkResult['MerchantRequestID'],
+                        'CheckoutRequestID' => $stkResult['CheckoutRequestID'],
+                        'CustomerMessage'   => $stkResult['CustomerMessage']
+                    ]
+                ], 200);
+            }
+
+            // Handles scenarios where the API request structural validation fails downstream on Safaricom's side
             return $this->jsonResponse($response, [
-                'status' => 'error',
-                'message' => 'Deposit failed: ' . $e->getMessage()
+                'status'  => 'error',
+                'message' => 'Safaricom gateway rejected initialization parameters.',
+                'details' => $stkResult
+            ], 400);
+
+        } catch (Exception $e) {
+            $this->logger->error('Welfare Controller Deposit Initialization Error: ' . $e->getMessage());
+            
+            return $this->jsonResponse($response, [
+                'status'  => 'error',
+                'message' => 'Server processing breakdown: ' . $e->getMessage()
             ], 500);
         }
     }
-
     // Add to WelfareClaimController.php
 
     public function getClaims(Request $request, Response $response): Response
