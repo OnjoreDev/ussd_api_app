@@ -1,10 +1,11 @@
 <?php
-
 declare(strict_types=1);
 
 namespace App\Controllers;
 
 use App\Models\Member;
+use App\Models\Mpesa;                  // 1. Import Mpesa Model
+use App\Services\MpesaService;         // 2. Import Mpesa Service
 use App\Services\TransactionService;
 use App\Services\SmsService;
 use Psr\Container\ContainerInterface;
@@ -17,6 +18,8 @@ class MainAccountController extends Controller
     private TransactionService $transactionService;
     private Member $member;
     private SmsService $smsService;
+    private MpesaService $mpesaService; // Added
+    private Mpesa $mpesaModel;         // Added
 
     public function __construct(ContainerInterface $container)
     {
@@ -24,47 +27,94 @@ class MainAccountController extends Controller
         $this->transactionService = $container->get(TransactionService::class);
         $this->member = $container->get(Member::class);
         $this->smsService = $container->get(SmsService::class);
+        $this->mpesaService = $container->get(MpesaService::class); // Instantiated
+        $this->mpesaModel = $container->get(Mpesa::class);         // Instantiated
     }
 
+
+    /**
+     * Processes an STK Push initialization deposit into the Main Wallet (ID 1).
+     * Replaces an atomic immediate credit with an asynchronous transaction log flow.
+     */
     public function deposit(Request $request, Response $response): Response
     {
         $data = $request->getParsedBody();
         $memberId = (int)($data['member_id'] ?? 0);
-        $amount = (int)($data['amount'] ?? 0);
+        $amount = (float)($data['amount'] ?? 0); // Convert to float for M-Pesa accuracy
 
         // 1. Basic Validation
-        if ($memberId <= 0 || $amount <= 0) {
-            return $this->jsonResponse($response, ['status' => 'error', 'message' => 'Invalid input'], 400);
+        // Your existing phone parameter must be captured here from the USSD Utility call
+        if ($memberId <= 0 || $amount <= 0 || empty($data['phone'])) {
+            return $this->jsonResponse($response, [
+                'status' => 'error', 
+                'message' => 'Invalid input parameters. Ensure member_id, amount, and phone are provided.'
+            ], 400);
         }
 
-        // 2. Generate unique reference
-        $receipt = 'MAIN-' . strtoupper(bin2hex(random_bytes(4)));
+        $phone = (string) $data['phone'];
+        $walletTypeId = 1; // Explicitly 1 for Main Wallet
+
+        // Ensure member exists
+        $memberLookup = $this->member->findById($memberId);
+        if (!$memberLookup) {
+            return $this->jsonResponse($response, [
+                'status' => 'error', 
+                'message' => 'Member account not found.'
+            ], 404);
+        }
 
         try {
-            // 3. Execute via Service (using creditWallet for atomic integrity)
-            $this->transactionService->execute(
-                $memberId,
-                1, // Main Wallet Type ID
-                $amount,
-                $receipt,
-                'General Main Account Deposit'
+            $this->logger->info("Initiating Main Deposit STK Push via USSD API trigger for Member ID: {$memberId}, Amount: {$amount}");
+
+            // 2. Trigger the Safaricom Daraja Gateway push prompt thread.
+            // Provide specific reference "Main Dep" and description "Main Wallet Fund"
+            $stkResult = $this->mpesaService->initiateStkPush(
+                $phone, 
+                $amount, 
+                "Main Dep", 
+                "Main Wallet Fund"
             );
 
-            // 4. Post-transaction handling
-            $member = $this->member->findById($memberId);
-            if ($member && !empty($member['phone'])) {
-                // Fetch updated balance for SMS notification
-                $balance = $this->getMainWalletBalance($memberId);
+            // 3. If Safaricom accepts the request structure, track it as 'pending' inside the database
+            if (isset($stkResult['ResponseCode']) && $stkResult['ResponseCode'] === "0") {
+                
+                $dbPayload = [
+                    'member_id'           => $memberId,
+                    'wallet_type_id'      => $walletTypeId,
+                    'amount'              => $amount,
+                    'phone_number'        => $phone,
+                    'checkout_request_id' => $stkResult['CheckoutRequestID'],
+                    'merchant_request_id' => $stkResult['MerchantRequestID']
+                ];
 
-                $message = "Deposit Success: KES $amount credited to your Main Account. New Balance: KES $balance. Receipt: $receipt";
-                $this->smsService->sendSMS($member['phone'], $message);
+                // Persist the transaction into mpesa_transactions table with its native 'pending' state flag
+                $this->mpesaModel->createTransaction($dbPayload);
+
+                return $this->jsonResponse($response, [
+                    'status'  => 'success',
+                    'message' => 'STK Push initiated successfully. Please enter your M-Pesa PIN on your phone.',
+                    'data'    => [
+                        'MerchantRequestID' => $stkResult['MerchantRequestID'],
+                        'CheckoutRequestID' => $stkResult['CheckoutRequestID'],
+                        'CustomerMessage'   => $stkResult['CustomerMessage']
+                    ]
+                ], 200);
             }
 
-            return $this->jsonResponse($response, ['status' => 'success']);
+            // Handles scenarios where the API request structural validation fails downstream on Safaricom's side
+            return $this->jsonResponse($response, [
+                'status'  => 'error',
+                'message' => 'Safaricom gateway rejected initialization parameters.',
+                'details' => $stkResult
+            ], 400);
+
         } catch (Exception $e) {
-            // Log error and return failure
-            error_log("Main Deposit Failed: " . $e->getMessage());
-            return $this->jsonResponse($response, ['status' => 'error', 'message' => 'Deposit failed'], 500);
+            $this->logger->error('Main Controller Deposit Initialization Error: ' . $e->getMessage());
+            
+            return $this->jsonResponse($response, [
+                'status'  => 'error',
+                'message' => 'Server processing breakdown: ' . $e->getMessage()
+            ], 500);
         }
     }
     /**
