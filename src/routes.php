@@ -65,6 +65,10 @@ return function (App $app) {
 
             // Main Account & Chama
             $secure->post('/main/deposit', [MainAccountController::class, 'deposit']);
+            
+            // Chama Points Operations
+            $secure->get('/chama/points/balance/{member_id}', [ChamaPointsController::class, 'getBalanceAction']);
+            $secure->post('/chama/points/redeem', [ChamaPointsController::class, 'redeemAction']);
             $secure->post('/chama/points/add', [ChamaPointsController::class, 'addPoints']);
 
             //STKPush

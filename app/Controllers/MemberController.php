@@ -116,22 +116,23 @@ class MemberController extends Controller
         $params = $request->getQueryParams();
         $phone = $params['phone'] ?? '';
 
-        // 1. Logic Delegation: Call Model to find user
         $user = $this->member->findByPhone($phone);
         if (!$user) {
             return $this->jsonResponse($response, ['status' => 'error', 'message' => 'Member not found'], 404);
         }
 
-        // 2. Logic Delegation: Call Model to get wallets
         $wallets = $this->member->getWalletsByMemberId((int)$user['id']);
 
-        // 3. Optional: Trigger SMS Notification for balances
         if (!empty($wallets)) {
-            $msg = "Your Jua Kali CBO Account Balances:\n";
+            $msg = "Your Jua Kali CBO Balances:\n";
             foreach ($wallets as $w) {
-                $symbol = ($w['wallet_name'] === 'chama points') ? 'Pts' : 'KES';
-                $msg .= ucfirst($w['wallet_name']) . ": {$symbol} " . number_format((float)$w['balance'], 2) . "\n";
+                // Use strtolower and trim to ensure the comparison works regardless of casing
+                $walletName = strtolower(trim((string)$w['wallet_name']));
+                $symbol = ($walletName === 'chama points') ? 'Pts' : 'KES';
+                
+                $msg .= ucfirst($w['wallet_name']) . ": {$symbol} " . number_format((float)$w['balance'], 0) . "\n";
             }
+            // Send SMS
             $this->smsService->sendSMS($phone, $msg);
         }
 

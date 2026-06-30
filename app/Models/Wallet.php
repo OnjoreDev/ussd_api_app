@@ -34,8 +34,33 @@ class Wallet extends Model
         $sql = "SELECT * FROM wallets WHERE member_id = ? AND wallet_type_id = ? LIMIT 1";
         $stmt = $this->pdo->prepare($sql);
         $stmt->execute([$memberId, $walletTypeId]);
-        
+
         $result = $stmt->fetch(PDO::FETCH_ASSOC);
         return $result ?: null;
+    }
+
+    // Add these to App\Models\Wallet
+
+    /**
+     * Specifically for Chama Points (Wallet ID 3)
+     */
+    public function updateChamaPoints(int $memberId, int $points): bool
+    {
+        // Points can be positive (earn) or negative (redeem)
+        $sql = "INSERT INTO wallets (member_id, wallet_type_id, balance) 
+            VALUES (?, 3, ?) 
+            ON DUPLICATE KEY UPDATE balance = balance + ?";
+
+        $stmt = $this->pdo->prepare($sql);
+        return $stmt->execute([$memberId, $points, $points]);
+    }
+
+    /**
+     * Fetch Chama Points balance specifically
+     */
+    public function getChamaPointsBalance(int $memberId): int
+    {
+        $wallet = $this->getWalletByMemberAndType($memberId, 3);
+        return $wallet ? (int)$wallet['balance'] : 0;
     }
 }

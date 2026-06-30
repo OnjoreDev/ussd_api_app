@@ -58,7 +58,7 @@ class WelfareClaimController extends Controller
         }
 
         $phone = (string) $data['phone'];
-        $amount = (float) $data['amount'];
+        $amount = (int) $data['amount'];
         $memberId = (int) $data['member_id'];
         $walletTypeId = 2; // Hardcoded strictly to ID 2 for the Welfare account wallet structure
 

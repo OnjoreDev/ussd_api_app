@@ -18,9 +18,9 @@ class Mpesa extends Model
                 (member_id, wallet_type_id, amount, phone_number, checkout_request_id, merchant_request_id, status) 
                 VALUES 
                 (:member_id, :wallet_type_id, :amount, :phone_number, :checkout_request_id, :merchant_request_id, 'pending')";
-        
+
         $stmt = $this->pdo->prepare($sql);
-        
+
         return $stmt->execute([
             ':member_id'           => (int) $data['member_id'],
             ':wallet_type_id'      => (int) $data['wallet_type_id'],
@@ -43,13 +43,30 @@ class Mpesa extends Model
         $sql = "UPDATE mpesa_transactions 
                 SET status = :status, mpesa_receipt_number = :receipt_number 
                 WHERE checkout_request_id = :checkout_request_id";
-                
+
         $stmt = $this->pdo->prepare($sql);
-        
+
         return $stmt->execute([
             ':status'              => $status,
             ':receipt_number'      => $receiptNumber,
             ':checkout_request_id' => $checkoutRequestId
         ]);
+    }
+
+    /**
+     * Retrieve transaction details by CheckoutRequestID
+     */
+    public function findByCheckoutRequestId(string $checkoutRequestId): ?array
+    {
+        $sql = "SELECT member_id, wallet_type_id, amount 
+            FROM mpesa_transactions 
+            WHERE checkout_request_id = :checkout_request_id 
+            LIMIT 1";
+
+        $stmt = $this->pdo->prepare($sql);
+        $stmt->execute([':checkout_request_id' => $checkoutRequestId]);
+
+        $result = $stmt->fetch(\PDO::FETCH_ASSOC);
+        return $result ?: null;
     }
 }

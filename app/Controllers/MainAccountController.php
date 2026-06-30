@@ -36,12 +36,12 @@ class MainAccountController extends Controller
      * Processes an STK Push initialization deposit into the Main Wallet (ID 1).
      * Replaces an atomic immediate credit with an asynchronous transaction log flow.
      */
-    
+
     public function deposit(Request $request, Response $response): Response
     {
         $data = $request->getParsedBody();
         $memberId = (int)($data['member_id'] ?? 0);
-        $amount = (float)($data['amount'] ?? 0); // Convert to float for M-Pesa accuracy
+        $amount = (int)($data['amount'] ?? 0); // Convert to float for M-Pesa accuracy
 
         // 1. Basic Validation
         // Your existing phone parameter must be captured here from the USSD Utility call
@@ -66,7 +66,7 @@ class MainAccountController extends Controller
 
         try {
             $this->logger->info("Initiating Main Deposit STK Push via USSD API trigger for Member ID: {$memberId}, Amount: {$amount}");
-
+            $this->logger->info("DEBUG: Sending STK to Phone: " . $phone);
             // 2. Trigger the Safaricom Daraja Gateway push prompt thread.
             // Provide specific reference "Main Dep" and description "Main Wallet Fund"
             $stkResult = $this->mpesaService->initiateStkPush(

@@ -16,7 +16,7 @@ class MpesaService
     private Client $client;
     private string $consumerKey;
     private string $consumerSecret;
-    private string $shortcode;
+    private string $shortcode = '174379'; // Hardcoded for Sandbox stability
     private string $passkey;
     private string $callbackUrl;
 
@@ -24,130 +24,76 @@ class MpesaService
     {
         $this->logger = $logger;
         
-        $mpesaBaseUrl = getenv('MPESA_BASE_URL') ?: ($_ENV['MPESA_BASE_URL'] ?? null);
-
-        if (!$mpesaBaseUrl) {
-            throw new Exception("M-Pesa configuration error: MPESA_BASE_URL is not set in the environment variables.");
-        }
+        $mpesaBaseUrl = getenv('MPESA_BASE_URL') ?: ($_ENV['MPESA_BASE_URL'] ?? 'https://sandbox.safaricom.co.ke/');
+        
+        $this->consumerKey    = getenv('MPESA_CONSUMER_KEY') ?: ($_ENV['MPESA_CONSUMER_KEY'] ?? '');
+        $this->consumerSecret = getenv('MPESA_CONSUMER_SECRET') ?: ($_ENV['MPESA_CONSUMER_SECRET'] ?? '');
+        $this->passkey        = getenv('MPESA_PASSKEY') ?: ($_ENV['MPESA_PASSKEY'] ?? '');
+        $this->callbackUrl    = getenv('MPESA_CALLBACK_URL') ?: ($_ENV['MPESA_CALLBACK_URL'] ?? '');
 
         $this->client = new Client([
             'base_uri' => rtrim($mpesaBaseUrl, '/') . '/',
-            'timeout'  => 15.0,
+            'timeout'  => 30.0,
+            'connect_timeout' => 30.0,
             'verify'   => false, 
         ]);
-
-        $this->consumerKey    = getenv('MPESA_CONSUMER_KEY') ?: ($_ENV['MPESA_CONSUMER_KEY'] ?? '');
-        $this->consumerSecret = getenv('MPESA_CONSUMER_SECRET') ?: ($_ENV['MPESA_CONSUMER_SECRET'] ?? '');
-        $this->shortcode      = getenv('MPESA_BUSINESS_SHORTCODE') ?: ($_ENV['MPESA_BUSINESS_SHORTCODE'] ?? '');
-        $this->passkey        = getenv('MPESA_PASSKEY') ?: ($_ENV['MPESA_PASSKEY'] ?? '');
-        
-        // FIX: Grab both values and ensure the token query parameter is appended safely
-        $rawCallbackUrl       = getenv('MPESA_CALLBACK_URL') ?: ($_ENV['MPESA_CALLBACK_URL'] ?? '');
-        $callbackToken        = getenv('MPESA_CALLBACK_TOKEN') ?: ($_ENV['MPESA_CALLBACK_TOKEN'] ?? '');
-
-        if (!empty($callbackToken) && !str_contains($rawCallbackUrl, 'token=')) {
-            // Append the query token seamlessly so Safaricom sends it right back to us
-            $this->callbackUrl = rtrim($rawCallbackUrl, '/') . '?token=' . $callbackToken;
-        } else {
-            $this->callbackUrl = $rawCallbackUrl;
-        }
     }
 
-    /**
-     * Generate OAuth Access Token from Safaricom using Guzzle Basic Auth
-     * @return string
-     * @throws Exception
-     */
-    public function generateAccessToken(): string
+    public function initiateStkPush(string $phoneNumber, int|float $amount, string $accountReference, string $transactionDesc)
     {
         try {
-            $response = $this->client->request('GET', 'oauth/v1/generate', [
-                'query' => ['grant_type' => 'client_credentials'],
-                'auth'  => [$this->consumerKey, $this->consumerSecret]
-            ]);
+            $token = $this->generateAccessToken();
+            $timestamp = date('YmdHis');
+            $password = base64_encode($this->shortcode . $this->passkey . $timestamp);
 
-            $data = json_decode($response->getBody()->getContents(), true);
-            return $data['access_token'] ?? '';
-
-        } catch (GuzzleException $e) {
-            $this->logger->error('Mpesa Auth Token Generation Failed via Guzzle', [
-                'error' => $e->getMessage()
-            ]);
-            throw new Exception('Failed to generate Mpesa access token: ' . $e->getMessage());
-        }
-    }
-
-    /**
-     * Initiate STK Push (Lipa Na M-Pesa Online) using Guzzle String-Cast Elements
-     * @param string $phoneNumber
-     * @param float $amount
-     * @param string $accountReference
-     * @param string $transactionDesc
-     * @return array
-     * @throws Exception
-     */
-    public function initiateStkPush(string $phoneNumber, float $amount, string $accountReference, string $transactionDesc): array
-    {
-        $token = $this->generateAccessToken();
-        $timestamp = date('YmdHis');
-        $password = base64_encode($this->shortcode . $this->passkey . $timestamp);
-
-        // Accept the pre-cleaned digits from the controller directly
-        $formattedPhone = preg_replace('/[^0-9]/', '', $phoneNumber); 
-
-        // Clear out character lengths and whitespace rules for string metrics
-        $cleanRef = substr(str_replace(' ', '', $accountReference), 0, 12);
-        $cleanDesc = substr(str_replace(' ', '', $transactionDesc), 0, 20);
-
-        if (empty($cleanRef)) { $cleanRef = 'WalletFund'; }
-        if (empty($cleanDesc)) { $cleanDesc = 'Payment'; }
-
-        // Formulate the array payload with strict explicit string casts for digits
-        $bodyArray = [
-            'BusinessShortCode' => (string) $this->shortcode,
-            'Password'          => (string) $password,
-            'Timestamp'         => (string) $timestamp,
-            'TransactionType'   => 'CustomerPayBillOnline',
-            'Amount'            => (string) (int) $amount,
-            'PartyA'            => (string) $formattedPhone,
-            'PartyB'            => (string) $this->shortcode,
-            'PhoneNumber'       => (string) $formattedPhone,
-            'CallBackURL'       => (string) $this->callbackUrl,
-            'AccountReference'  => (string) $cleanRef,
-            'TransactionDesc'   => (string) $cleanDesc,
-        ];
-
-        try {
-            // Encode cleanly preventing unescaped backslashes on the callback endpoint string
-            $jsonPayload = json_encode($bodyArray, JSON_UNESCAPED_SLASHES);
+            $bodyArray = [
+                'BusinessShortCode' => $this->shortcode,
+                'Password'          => $password,
+                'Timestamp'         => $timestamp,
+                'TransactionType'   => 'CustomerPayBillOnline',
+                'Amount'            => (int)$amount,
+                'PartyA'            => $phoneNumber,
+                'PartyB'            => $this->shortcode,
+                'PhoneNumber'       => $phoneNumber,
+                'CallBackURL'       => $this->callbackUrl,
+                'AccountReference'  => $accountReference,
+                'TransactionDesc'   => $transactionDesc
+            ];
 
             $response = $this->client->request('POST', 'mpesa/stkpush/v1/processrequest', [
                 'headers' => [
                     'Authorization' => 'Bearer ' . $token,
                     'Content-Type'  => 'application/json',
-                    'Accept'        => 'application/json',
                 ],
-                'body' => $jsonPayload,
+                'json' => $bodyArray,
             ]);
 
             return json_decode($response->getBody()->getContents(), true);
 
         } catch (RequestException $e) {
-            // Unpack exact untruncated structural rejection payloads from Safaricom's sandbox
-            if ($e->hasResponse() && $e->getResponse() !== null) {
-                $rawResponseBody = $e->getResponse()->getBody()->getContents();
-                $this->logger->error('SAFARICOM RAW UNTRUNCATED ERROR REASON: ' . $rawResponseBody);
-            }
+            $rawBody = $e->hasResponse() ? $e->getResponse()->getBody()->getContents() : 'No Response Body';
+            $this->logger->error('STK Push Failed. Reason: ' . $rawBody);
+            throw new Exception('STK push initiation failed: ' . $rawBody);
+        }
+    }
 
-            $this->logger->error('Mpesa STK Push Request Failed via Guzzle handling', [
-                'message' => $e->getMessage()
+    private function generateAccessToken(): string
+    {
+        try {
+            $credentials = base64_encode($this->consumerKey . ':' . $this->consumerSecret);
+
+            $response = $this->client->request('GET', 'oauth/v1/generate?grant_type=client_credentials', [
+                'headers' => [
+                    'Authorization' => 'Basic ' . $credentials,
+                    'Accept'        => 'application/json',
+                ]
             ]);
             
-            throw new Exception('STK push initiation failed: ' . $e->getMessage());
-
-        } catch (GuzzleException $e) {
-            $this->logger->error('Mpesa Network/Timeout Failure: ' . $e->getMessage());
-            throw new Exception('Safaricom gateway connection timeout: ' . $e->getMessage());
+            $data = json_decode($response->getBody()->getContents(), true);
+            return $data['access_token'];
+        } catch (Exception $e) {
+            $this->logger->error('OAuth Failed: ' . $e->getMessage());
+            throw new Exception('Authentication with Safaricom failed.');
         }
     }
 }
