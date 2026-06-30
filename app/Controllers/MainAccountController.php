@@ -4,8 +4,8 @@ declare(strict_types=1);
 namespace App\Controllers;
 
 use App\Models\Member;
-use App\Models\Mpesa;                  // 1. Import Mpesa Model
-use App\Services\MpesaService;         // 2. Import Mpesa Service
+use App\Models\Mpesa;                  
+use App\Services\MpesaService;         
 use App\Services\TransactionService;
 use App\Services\SmsService;
 use Psr\Container\ContainerInterface;
@@ -36,6 +36,7 @@ class MainAccountController extends Controller
      * Processes an STK Push initialization deposit into the Main Wallet (ID 1).
      * Replaces an atomic immediate credit with an asynchronous transaction log flow.
      */
+    
     public function deposit(Request $request, Response $response): Response
     {
         $data = $request->getParsedBody();

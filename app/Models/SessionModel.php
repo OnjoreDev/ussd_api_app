@@ -31,8 +31,8 @@ class SessionModel extends Model
 
     public function createSession(string $sessionId, string $msisdn, string $ussdCode): bool
     {
-        // Using IGNORE or standard INSERT. Since we have a unique index, 
-        // this will safely create a new session or fail if it exists.
+        // Using standard INSERT. Since we have a unique index on session_id,
+        // this will safely create a new session tracking row.
         $stmt = $this->pdo->prepare("
             INSERT INTO ussd_inbox (session_id, msisdn, shortcode, temp_level, message) 
             VALUES (:session_id, :msisdn, :shortcode, :temp_level, :message)
@@ -41,7 +41,7 @@ class SessionModel extends Model
             ':session_id' => $sessionId,
             ':msisdn'     => $msisdn,
             ':shortcode'  => $ussdCode,
-            ':temp_level' => 'MemberMainMenu',
+            ':temp_level' => 'InitialGateway', // Changed from 'MemberMainMenu' to secure entry
             ':message'    => $ussdCode
         ]);
     }
