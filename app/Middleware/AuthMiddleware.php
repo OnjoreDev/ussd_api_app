@@ -30,7 +30,19 @@ class AuthMiddleware implements MiddlewareInterface
             return $response->withStatus(401)->withHeader('Content-Type', 'application/json');
         }
 
-        // 5. Success: Proceed to the next middleware or controller
+        /**
+         * 5. Identify the user
+         * You must identify which member is making this request.
+         * You might get this from a header, a session ID, or the request body.
+         * Example: $memberId = $request->getHeaderLine('X-Member-ID');
+         */
+        $memberId = (int)($request->getHeaderLine('X-Member-ID') ?: 0); 
+        
+        // 6. Attach the member_id to the request attributes
+        // This makes it available to all subsequent middleware (like AgentMiddleware)
+        $request = $request->withAttribute('member_id', $memberId);
+
+        // 7. Success: Proceed to the next middleware or controller
         return $handler->handle($request);
     }
 }

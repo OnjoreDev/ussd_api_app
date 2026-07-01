@@ -13,6 +13,7 @@ use App\Controllers\ChamaPointsController;
 use App\Middleware\AuthMiddleware;
 use App\Controllers\MpesaResponseController;
 use App\Controllers\MpesaController;
+use App\Middleware\AgentMiddleware;
 use Slim\App;
 use Slim\Routing\RouteCollectorProxy;
 
@@ -37,7 +38,7 @@ return function (App $app) {
         // 3. PUBLIC MEMBER OPERATIONS
         $group->get('/member/check-registration/{phone}', [MemberController::class, 'checkRegistration']);
         $group->get('/member/customer-care-details', [MemberController::class, 'getCustomerCareDetails']);
-         
+
         //PUBLIC MPESA ROUTE
         $group->post('/payment-hook', [MpesaResponseController::class, 'handleCallback']);
 
@@ -48,6 +49,7 @@ return function (App $app) {
             $secure->get('/member/dashboard', [MemberController::class, 'getDashboard']);
             $secure->get('/member/balances', [MemberController::class, 'getBalances']);
             $secure->get('/member/find-by-phone/{phone}', [MemberController::class, 'findByPhone']);
+            $secure->get('/member/has-role', [MemberController::class, 'checkRole']);
 
             // Loan Operations
             $secure->post('/loan/request', [LoanController::class, 'requestLoan']);
@@ -65,15 +67,17 @@ return function (App $app) {
 
             // Main Account & Chama
             $secure->post('/main/deposit', [MainAccountController::class, 'deposit']);
-            
+
             // Chama Points Operations
             $secure->get('/chama/points/balance/{member_id}', [ChamaPointsController::class, 'getBalanceAction']);
             $secure->post('/chama/points/redeem', [ChamaPointsController::class, 'redeemAction']);
-            $secure->post('/chama/points/add', [ChamaPointsController::class, 'addPoints']);
+            $secure->post('/chama/points/add', [ChamaPointsController::class, 'addPoints'])
+                ->add(AgentMiddleware::class);
+            $secure->post('/chama/points/withdraw', ChamaPointsController::class . 'withdrawPoints')
+                    ->add(AgentMiddleware::class);
 
             //STKPush
             $secure->post('/mpesa/stk-push', [MpesaController::class, 'initiateStk']);
-
         })->add(AuthMiddleware::class);
     });
 };

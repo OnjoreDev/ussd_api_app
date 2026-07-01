@@ -129,7 +129,7 @@ class MemberController extends Controller
                 // Use strtolower and trim to ensure the comparison works regardless of casing
                 $walletName = strtolower(trim((string)$w['wallet_name']));
                 $symbol = ($walletName === 'chama points') ? 'Pts' : 'KES';
-                
+
                 $msg .= ucfirst($w['wallet_name']) . ": {$symbol} " . number_format((float)$w['balance'], 0) . "\n";
             }
             // Send SMS
@@ -140,5 +140,21 @@ class MemberController extends Controller
             'status' => 'success',
             'wallets' => $wallets
         ]);
+    }
+
+    //check if user has a specific role
+    public function checkRole(Request $request, Response $response): Response
+    {
+        $params = $request->getQueryParams();
+        $phone = $params['phone'] ?? '';
+        $roleName = $params['role'] ?? '';
+
+        $member = $this->member->findByPhone($phone);
+        if (!$member) {
+            return $this->jsonResponse($response, ['has_role' => false]);
+        }
+
+        $hasRole = $this->member->hasRole((int)$member['id'], $roleName);
+        return $this->jsonResponse($response, ['has_role' => $hasRole]);
     }
 }

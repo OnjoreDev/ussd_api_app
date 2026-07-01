@@ -29,19 +29,38 @@ class SessionModel extends Model
         $stmt->execute([$level, $sessionId]);
     }
 
+    // public function createSession(string $sessionId, string $msisdn, string $ussdCode): bool
+    // {
+    //     // Using standard INSERT. Since we have a unique index on session_id,
+    //     // this will safely create a new session tracking row.
+    //     $stmt = $this->pdo->prepare("
+    //         INSERT INTO ussd_inbox (session_id, msisdn, shortcode, temp_level, message) 
+    //         VALUES (:session_id, :msisdn, :shortcode, :temp_level, :message)
+    //     ");
+    //     return $stmt->execute([
+    //         ':session_id' => $sessionId,
+    //         ':msisdn'     => $msisdn,
+    //         ':shortcode'  => $ussdCode,
+    //         ':temp_level' => 'InitialGateway', // Changed from 'MemberMainMenu' to secure entry
+    //         ':message'    => $ussdCode
+    //     ]);
+    // }
     public function createSession(string $sessionId, string $msisdn, string $ussdCode): bool
     {
-        // Using standard INSERT. Since we have a unique index on session_id,
-        // this will safely create a new session tracking row.
+        // Use ON DUPLICATE KEY UPDATE to handle potential retries gracefully
         $stmt = $this->pdo->prepare("
-            INSERT INTO ussd_inbox (session_id, msisdn, shortcode, temp_level, message) 
-            VALUES (:session_id, :msisdn, :shortcode, :temp_level, :message)
-        ");
+        INSERT INTO ussd_inbox (session_id, msisdn, shortcode, temp_level, message) 
+        VALUES (:session_id, :msisdn, :shortcode, :temp_level, :message)
+        ON DUPLICATE KEY UPDATE 
+            temp_level = VALUES(temp_level), 
+            message = VALUES(message)
+    ");
+
         return $stmt->execute([
             ':session_id' => $sessionId,
             ':msisdn'     => $msisdn,
             ':shortcode'  => $ussdCode,
-            ':temp_level' => 'InitialGateway', // Changed from 'MemberMainMenu' to secure entry
+            ':temp_level' => 'InitialGateway',
             ':message'    => $ussdCode
         ]);
     }
@@ -63,7 +82,7 @@ class SessionModel extends Model
         $stmt = $this->pdo->prepare("SELECT message FROM ussd_inbox WHERE session_id = ?");
         $stmt->execute([$sessionId]);
         $row = $stmt->fetch(PDO::FETCH_ASSOC);
-        
+
         return $row ? explode('|', $row['message']) : [];
     }
 }

@@ -105,5 +105,20 @@ class Member extends Model
 
         return $stmt->fetchAll(PDO::FETCH_ASSOC);
     }
+    //check the roles a member has
+    // Inside App\Models\Member.php
 
+    public function hasRole(int $memberId, string $roleName): bool
+    {
+        $sql = "SELECT COUNT(*) 
+            FROM member_roles mr
+            JOIN roles r ON mr.role_id = r.id
+            WHERE mr.member_id = ? AND r.name = ? LIMIT 1";
+
+        $stmt = $this->pdo->prepare($sql);
+        $stmt->execute([$memberId, $roleName]);
+
+        // Returns true if count is greater than 0
+        return (int)$stmt->fetchColumn() > 0;
     }
+}

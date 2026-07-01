@@ -24,45 +24,49 @@ class TransactionService
 
     /**
      * Executes an atomic financial transaction.
-     * Updates the wallet balance and records the ledger entry.
+     * @param int $amount Points to be debited/credited.
+     * @param string $type Either 'Credit' or 'Debit'.
      */
-    public function execute(int $memberId, int $walletTypeId, int $amount, string $reference, string $description): bool
-{
-    try {
-        $this->pdo->beginTransaction();
+    // In TransactionService.php -> execute()
 
-        // 1. Attempt to get the wallet, using FOR UPDATE to lock it
-        $stmt = $this->pdo->prepare("SELECT balance FROM wallets WHERE member_id = ? AND wallet_type_id = ? FOR UPDATE");
-        $stmt->execute([$memberId, $walletTypeId]);
-        $wallet = $stmt->fetch();
+    public function execute(int $memberId, int $walletTypeId, int $amount, string $type, string $reference, string $description): bool
+    {
+        try {
+            $this->pdo->beginTransaction();
 
-        if ($wallet) {
-            $previousBalance = $wallet['balance'];
-        } else {
-            // If no wallet exists, initialize it at 0
-            $previousBalance = 0;
-            $this->pdo->prepare("INSERT INTO wallets (member_id, wallet_type_id, balance) VALUES (?, ?, 0)")
-                     ->execute([$memberId, $walletTypeId]);
-        }
+            // 1. Lock the current wallet balance (Raw points)
+            $stmt = $this->pdo->prepare("SELECT balance FROM wallets WHERE member_id = ? AND wallet_type_id = ? FOR UPDATE");
+            $stmt->execute([$memberId, $walletTypeId]);
+            $wallet = $stmt->fetch();
 
-        $newBalance = $previousBalance + $amount;
+            $previousPoints = $wallet ? (int)$wallet['balance'] : 0;
 
-        // 2. Log to Transactions
-        $stmt = $this->pdo->prepare("INSERT INTO transactions 
+            // 2. Calculate New Balance (RAW POINTS - no multiplication here)
+            $newPoints = ($type === 'Debit') ? ($previousPoints - $amount) : ($previousPoints + $amount);
+
+            // 3. Prepare Ledger Values (Apply * 10 ONLY for the transaction log)
+            $ledgerAmount = $amount * 10;
+            $ledgerPrev   = $previousPoints * 10;
+            $ledgerNew    = $newPoints * 10;
+
+            // 4. Log to Transactions table (uses multiplied KSH values)
+            $stmt = $this->pdo->prepare("INSERT INTO transactions 
             (member_id, wallet_type_id, type, amount, previous_balance, running_balance, reference, description) 
-            VALUES (?, ?, 'Credit', ?, ?, ?, ?, ?)");
-        $stmt->execute([$memberId, $walletTypeId, $amount, $previousBalance, $newBalance, $reference, $description]);
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)");
 
-        // 3. Update the Balance
-        $stmt = $this->pdo->prepare("UPDATE wallets SET balance = ? WHERE member_id = ? AND wallet_type_id = ?");
-        $stmt->execute([$newBalance, $memberId, $walletTypeId]);
+            $stmt->execute([$memberId, $walletTypeId, $type, $ledgerAmount, $ledgerPrev, $ledgerNew, $reference, $description]);
 
-        $this->pdo->commit();
-        return true;
+            // 5. Update the Wallet Balance (USE RAW POINTS)
+            // This is the specific line that ensures your wallet table stays correct
+            $stmt = $this->pdo->prepare("UPDATE wallets SET balance = ? WHERE member_id = ? AND wallet_type_id = ?");
+            $stmt->execute([$newPoints, $memberId, $walletTypeId]);
 
-    } catch (Exception $e) {
-        $this->pdo->rollBack();
-        throw $e;
+            $this->pdo->commit();
+            return true;
+        } catch (Exception $e) {
+            $this->pdo->rollBack();
+            $this->logger->error("Transaction failed: " . $e->getMessage());
+            return false;
+        }
     }
-}
 }
