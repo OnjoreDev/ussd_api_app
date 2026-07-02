@@ -142,19 +142,25 @@ class MemberController extends Controller
         ]);
     }
 
-    //check if user has a specific role
+    // check if user has a specific role
     public function checkRole(Request $request, Response $response): Response
     {
         $params = $request->getQueryParams();
-        $phone = $params['phone'] ?? '';
-        $roleName = $params['role'] ?? '';
+        $phone = isset($params['phone']) ? trim((string)$params['phone']) : '';
+        $roleName = isset($params['role']) ? trim((string)$params['role']) : '';
+
+        if (empty($phone) || empty($roleName)) {
+            return $this->jsonResponse($response, ['has_role' => false]);
+        }
 
         $member = $this->member->findByPhone($phone);
         if (!$member) {
             return $this->jsonResponse($response, ['has_role' => false]);
         }
 
-        $hasRole = $this->member->hasRole((int)$member['id'], $roleName);
+        // FORCE explicit boolean casting (bool) to eliminate truthy object/array leakages
+        $hasRole = (bool) $this->member->hasRole((int)$member['id'], $roleName);
+
         return $this->jsonResponse($response, ['has_role' => $hasRole]);
     }
 }

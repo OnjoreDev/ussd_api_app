@@ -24,7 +24,7 @@ class MpesaResponseController extends Controller
 
     public function handleCallback(Request $request, Response $response): Response
     {
-        // FIX: Read raw body directly to avoid middleware/parsing issues
+        // Read raw body directly to avoid middleware/parsing issues
         $rawPayload = $request->getBody()->getContents();
         $this->logger->info('Mpesa Callback Raw Payload: ' . $rawPayload);
         
@@ -39,6 +39,7 @@ class MpesaResponseController extends Controller
 
         if ($callbackData && isset($callbackData['ResultCode'])) {
             $resultCode = (int) $callbackData['ResultCode'];
+            $resultDesc = (string) ($callbackData['ResultDesc'] ?? '');
             $checkoutRequestID = (string) ($callbackData['CheckoutRequestID'] ?? '');
 
             if ($resultCode === 0) {
@@ -48,21 +49,36 @@ class MpesaResponseController extends Controller
                     $metadata = $callbackData['CallbackMetadata']['Item'] ?? [];
                     $receiptNumber = $this->extractMetaValue($metadata, 'MpesaReceiptNumber');
                     
-                    // Update Ledger
-                    $this->transactionService->execute(
+                    // FIXED: Properly passing 'Credit' as the 4th argument to match the signature
+                    $ledgerSuccess = $this->transactionService->execute(
                         (int)$tx['member_id'],
                         (int)$tx['wallet_type_id'],
                         (int)$tx['amount'],
+                        'Credit', 
                         $checkoutRequestID,
                         'M-Pesa Deposit: ' . $receiptNumber
                     );
 
-                    $this->mpesaModel->updateTransactionStatus($checkoutRequestID, 'completed', $receiptNumber);
-                    $this->logger->info("Transaction $checkoutRequestID successfully processed.");
+                    if ($ledgerSuccess) {
+                        $this->mpesaModel->updateTransactionStatus($checkoutRequestID, 'completed', $receiptNumber);
+                        $this->logger->info("Transaction $checkoutRequestID successfully processed and posted to ledger.");
+                    } else {
+                        $this->logger->error("Transaction $checkoutRequestID payment succeeded but Ledger Write Failed.");
+                    }
+                } else {
+                    $this->logger->warning("M-Pesa payment succeeded but CheckoutRequestID {$checkoutRequestID} not found in database.");
                 }
             } else {
                 $this->mpesaModel->updateTransactionStatus($checkoutRequestID, 'failed');
-                $this->logger->warning("Transaction $checkoutRequestID marked as failed.");
+                
+                // Specific descriptive logs for tracking Distinct Safaricom drop buckets
+                if ($resultCode === 1037) {
+                    $this->logger->warning("Transaction {$checkoutRequestID} FAILED: Handset Unreachable/Timeout (ResultCode 1037).");
+                } elseif ($resultCode === 1032) {
+                    $this->logger->warning("Transaction {$checkoutRequestID} FAILED: Cancelled explicitly by user (ResultCode 1032).");
+                } else {
+                    $this->logger->warning("Transaction {$checkoutRequestID} FAILED with Code {$resultCode}: {$resultDesc}");
+                }
             }
         }
 
