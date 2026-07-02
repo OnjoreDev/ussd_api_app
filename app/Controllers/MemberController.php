@@ -30,28 +30,29 @@ class MemberController extends Controller
     // Example endpoint to get profile/balance info
     public function getDashboard(Request $request, Response $response): Response
     {
-        // Get the phone from the request (or token)
         $params = $request->getQueryParams();
         $phone = $params['phone'] ?? '';
 
         $user = $this->member->findByPhone($phone);
 
         if (!$user) {
-            $response->getBody()->write(json_encode(['status' => 'error', 'message' => 'Member not found']));
-            return $response->withStatus(404)->withHeader('Content-Type', 'application/json');
+            return $this->jsonResponse($response, ['status' => 'error', 'message' => 'Member not found'], 404);
         }
 
-        // Return structured data for the USSD client to render
-        $payload = [
-            'name' => $user['name'],
-            'balance' => '500.00', // You would link this to your Transactions/Ledger logic
-            'vocation' => $user['vocation']
-        ];
+        $wallets = $this->member->getWalletsByMemberId((int)$user['id']);
 
-        $response->getBody()->write(json_encode($payload));
-        return $response->withHeader('Content-Type', 'application/json');
+        return $this->jsonResponse($response, [
+            'status' => 'success',
+            'member' => [
+                'id' => $user['id'],
+                'name' => $user['name'],
+                'phone' => $user['phone'],
+                'tier' => $user['tier_name'], // "Premium" or "Digital"
+                'tier_expired' => isset($user['tier_expires_at']) && strtotime($user['tier_expires_at']) < time()
+            ],
+            'wallets' => $wallets
+        ]);
     }
-
     // MemberController.php
 
     public function checkRegistration(Request $request, Response $response): Response

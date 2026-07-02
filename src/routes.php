@@ -13,6 +13,7 @@ use App\Controllers\ChamaPointsController;
 use App\Middleware\AuthMiddleware;
 use App\Controllers\MpesaResponseController;
 use App\Controllers\MpesaController;
+use App\Controllers\MembershipTierController;
 use App\Middleware\AgentMiddleware;
 use Slim\App;
 use Slim\Routing\RouteCollectorProxy;
@@ -51,6 +52,13 @@ return function (App $app) {
             $secure->get('/member/find-by-phone/{phone}', [MemberController::class, 'findByPhone']);
             $secure->get('/member/has-role', [MemberController::class, 'checkRole']);
 
+            // Membership Tiers CRUD Actions
+            $secure->get('/membership-tiers', [MembershipTierController::class, 'index']);
+            $secure->get('/membership-tiers/{id}', [MembershipTierController::class, 'show']);
+            $secure->post('/membership-tiers', [MembershipTierController::class, 'create']);
+            $secure->put('/membership-tiers/{id}', [MembershipTierController::class, 'update']);
+            $secure->delete('/membership-tiers/{id}', [MembershipTierController::class, 'delete']);
+            
             // Loan Operations
             $secure->post('/loan/request', [LoanController::class, 'requestLoan']);
             $secure->post('/loan/disburse', [LoanController::class, 'disburseLoan']);
@@ -74,7 +82,7 @@ return function (App $app) {
             $secure->post('/chama/points/add', [ChamaPointsController::class, 'addPoints'])
                 ->add(AgentMiddleware::class);
             $secure->post('/chama/points/withdraw', ChamaPointsController::class . 'withdrawPoints')
-                    ->add(AgentMiddleware::class);
+                ->add(AgentMiddleware::class);
 
             //STKPush
             $secure->post('/mpesa/stk-push', [MpesaController::class, 'initiateStk']);

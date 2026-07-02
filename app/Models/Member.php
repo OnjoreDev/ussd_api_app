@@ -17,15 +17,25 @@ class Member extends Model
 
     public function findByPhone(string $phone): ?array
     {
-        $stmt = $this->pdo->prepare("SELECT * FROM members WHERE phone = ?");
+        $stmt = $this->pdo->prepare("
+        SELECT 
+            m.*, 
+            t.name as tier_name, 
+            t.annual_fee as tier_fee
+        FROM members m
+        JOIN membership_tiers t ON m.membership_tier_id = t.id
+        WHERE m.phone = ? 
+        LIMIT 1
+    ");
         $stmt->execute([$phone]);
         return $stmt->fetch(PDO::FETCH_ASSOC) ?: null;
     }
 
     public function create(string $name, string $phone, string $vocation): bool
     {
-        $stmt = $this->pdo->prepare("INSERT INTO members (name, phone, vocation) VALUES (?, ?, ?)");
-        return $stmt->execute([$name, $phone, $vocation]);
+        $default_membership_tier = 1; //Digital Member default for all members
+        $stmt = $this->pdo->prepare("INSERT INTO members (name, membership_tier_id,phone, vocation) VALUES (?,?, ?, ?)");
+        return $stmt->execute([$name, $default_membership_tier, $phone, $vocation]);
     }
 
     public function updateOtp(string $phone, string $hashedOtp, string $expiry): void
@@ -106,7 +116,6 @@ class Member extends Model
         return $stmt->fetchAll(PDO::FETCH_ASSOC);
     }
     //check the roles a member has
-    // Inside App\Models\Member.php
 
     public function hasRole(int $memberId, string $roleName): bool
     {
