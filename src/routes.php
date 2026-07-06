@@ -28,6 +28,9 @@ return function (App $app) {
         $group->post('/auth/verify-otp', [AuthController::class, 'verifyOtp']);
         $group->post('/auth/set-pin', [AuthController::class, 'setPin']);
         $group->post('/auth/login', [AuthController::class, 'login']);
+        $group->post('/auth/change-pin', [AuthController::class, 'changePin']);
+        $group->post('/auth/verify-pin', [AuthController::class, 'verifyPin']);
+
 
         // 2. SESSION (Public)
         $group->post('/session/create', [SessionController::class, 'create']);

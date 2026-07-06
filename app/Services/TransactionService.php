@@ -27,8 +27,6 @@ class TransactionService
      * @param int $amount Points to be debited/credited.
      * @param string $type Either 'Credit' or 'Debit'.
      */
-    // In TransactionService.php -> execute()
-
     public function execute(int $memberId, int $walletTypeId, int $amount, string $type, string $reference, string $description): bool
     {
         try {
@@ -44,12 +42,18 @@ class TransactionService
             // 2. Calculate New Balance (RAW POINTS - no multiplication here)
             $newPoints = ($type === 'Debit') ? ($previousPoints - $amount) : ($previousPoints + $amount);
 
-            // 3. Prepare Ledger Values (Apply * 10 ONLY for the transaction log)
-            $ledgerAmount = $amount * 10;
-            $ledgerPrev   = $previousPoints * 10;
-            $ledgerNew    = $newPoints * 10;
+            // 3. Prepare Ledger Values (Apply * 10 ONLY for Chama points wallet_type_id = 3)
+            if ($walletTypeId === 3) {
+                $ledgerAmount = $amount * 10;
+                $ledgerPrev   = $previousPoints * 10;
+                $ledgerNew    = $newPoints * 10;
+            } else {
+                $ledgerAmount = $amount;
+                $ledgerPrev   = $previousPoints;
+                $ledgerNew    = $newPoints;
+            }
 
-            // 4. Log to Transactions table (uses multiplied KSH values)
+            // 4. Log to Transactions table
             $stmt = $this->pdo->prepare("INSERT INTO transactions 
             (member_id, wallet_type_id, type, amount, previous_balance, running_balance, reference, description) 
             VALUES (?, ?, ?, ?, ?, ?, ?, ?)");
@@ -57,7 +61,6 @@ class TransactionService
             $stmt->execute([$memberId, $walletTypeId, $type, $ledgerAmount, $ledgerPrev, $ledgerNew, $reference, $description]);
 
             // 5. Update the Wallet Balance (USE RAW POINTS)
-            // This is the specific line that ensures your wallet table stays correct
             $stmt = $this->pdo->prepare("UPDATE wallets SET balance = ? WHERE member_id = ? AND wallet_type_id = ?");
             $stmt->execute([$newPoints, $memberId, $walletTypeId]);
 

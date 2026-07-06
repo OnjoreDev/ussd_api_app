@@ -150,4 +150,68 @@ class AuthController extends Controller
 
         return $this->jsonResponse($response, ['status' => 'error', 'message' => 'Invalid PIN'], 401);
     }
+
+    /**
+     * 6.Handles the secure change of a member's PIN.
+     */
+    public function changePin(Request $request, Response $response): Response
+    {
+        $data = $request->getParsedBody();
+        $phone = $data['phone'] ?? '';
+        $oldPin = $data['old_pin'] ?? '';
+        $newPin = $data['new_pin'] ?? '';
+
+        // 1. Validation: Ensure all fields are present
+        if (empty($phone) || empty($oldPin) || empty($newPin)) {
+            return $this->jsonResponse($response, ['status' => 'error', 'message' => 'Missing data.'], 400);
+        }
+
+        // 2. Fetch the member record
+        $user = $this->member->findByPhone($phone);
+
+        if (!$user) {
+            return $this->jsonResponse($response, ['status' => 'error', 'message' => 'Member not found.'], 404);
+        }
+
+        // 3. Security: Verify the old PIN against the stored hash
+        if (password_verify($oldPin, $user['pin_hash'])) {
+
+            // 4. Update with new hashed PIN
+            $hashedNewPin = password_hash($newPin, PASSWORD_BCRYPT);
+            $this->member->updatePin($phone, $hashedNewPin);
+             
+            //after pin has been updated send message
+            $user = $this->member->findByPhone($phone);
+            //attach the name to the message 
+            $msg = $user['name'] ." your pin has been successfully updated ";
+            $this->smsService->sendSMS($phone, $msg);
+        
+            return $this->jsonResponse($response, ['status' => 'success', 'message' => 'PIN updated successfully.']);
+        }
+
+        // 5. Failure: Incorrect current PIN
+        return $this->jsonResponse($response, ['status' => 'error', 'message' => 'Current PIN is incorrect.'], 401);
+    }
+
+    /**
+     * 7. VERIFY PIN: A lightweight way for USSD to check PIN correctness
+     */
+    public function verifyPin(Request $request, Response $response): Response
+    {
+        $data = $request->getParsedBody();
+        $phone = $data['phone'] ?? '';
+        $pin = $data['pin'] ?? '';
+
+        if (empty($phone) || empty($pin)) {
+            return $this->jsonResponse($response, ['status' => 'error', 'message' => 'Missing data'], 400);
+        }
+
+        $user = $this->member->findByPhone($phone);
+
+        if ($user && password_verify($pin, $user['pin_hash'])) {
+            return $this->jsonResponse($response, ['status' => 'success']);
+        }
+
+        return $this->jsonResponse($response, ['status' => 'error', 'message' => 'Invalid PIN'], 401);
+    }
 }
