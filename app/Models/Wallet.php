@@ -31,7 +31,10 @@ class Wallet extends Model
      */
     public function getWalletByMemberAndType(int $memberId, int $walletTypeId): ?array
     {
-        $sql = "SELECT * FROM wallets WHERE member_id = ? AND wallet_type_id = ? LIMIT 1";
+        $sql = "SELECT w.id, w.member_id, w.balance, w.wallet_type_id, m.id, m.phone FROM wallets AS w 
+                JOIN members as m WHERE member_id = ? 
+                AND wallet_type_id = ? 
+                LIMIT 1;";
         $stmt = $this->pdo->prepare($sql);
         $stmt->execute([$memberId, $walletTypeId]);
 

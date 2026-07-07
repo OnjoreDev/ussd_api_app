@@ -91,6 +91,7 @@ class Member extends Model
     public function initializeWallets(int $memberId): void
     {
         // You have 4 placeholders (one for each wallet_type_id)
+        //create wallets with a balance of 0
         $stmt = $this->pdo->prepare("
         INSERT INTO wallets (member_id, wallet_type_id, balance) 
         VALUES (?, 1, 0), (?, 2, 0), (?, 3, 0), (?, 4, 0)
@@ -130,4 +131,7 @@ class Member extends Model
         // Returns true if count is greater than 0
         return (int)$stmt->fetchColumn() > 0;
     }
-}
+
+    
+
+    }

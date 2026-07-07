@@ -42,7 +42,7 @@ class ChamaPointsController extends Controller
 
         $balance = $this->walletModel->getChamaPointsBalance($memberId);
         $user = $this->memberModel->findById($memberId);
-        $this->smsService->sendSMS($user["phone"],"Your chama points balanve is ".$balance);
+        $this->smsService->sendSMS($user["phone"],"Your chama points balance is ".$balance);
 
         return $this->jsonResponse($response, ['balance' => $balance]);
     }

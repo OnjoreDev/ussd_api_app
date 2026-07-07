@@ -78,6 +78,7 @@ return function (App $app) {
 
             // Main Account & Chama
             $secure->post('/main/deposit', [MainAccountController::class, 'deposit']);
+            $secure->get('/main/main-balance',[MainAccountController::class,'getMainWalletBalance']);
 
             // Chama Points Operations
             $secure->get('/chama/points/balance/{member_id}', [ChamaPointsController::class, 'getBalanceAction']);

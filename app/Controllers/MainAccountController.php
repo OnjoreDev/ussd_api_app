@@ -4,7 +4,8 @@ declare(strict_types=1);
 namespace App\Controllers;
 
 use App\Models\Member;
-use App\Models\Mpesa;                  
+use App\Models\Mpesa;
+use App\Models\Wallet;
 use App\Services\MpesaService;         
 use App\Services\TransactionService;
 use App\Services\SmsService;
@@ -20,6 +21,7 @@ class MainAccountController extends Controller
     private SmsService $smsService;
     private MpesaService $mpesaService; // Added
     private Mpesa $mpesaModel;         // Added
+    private Wallet $walletModel;
 
     public function __construct(ContainerInterface $container)
     {
@@ -29,6 +31,7 @@ class MainAccountController extends Controller
         $this->smsService = $container->get(SmsService::class);
         $this->mpesaService = $container->get(MpesaService::class); // Instantiated
         $this->mpesaModel = $container->get(Mpesa::class);         // Instantiated
+        $this->walletModel = $container->get(Wallet::class);
     }
 
 
@@ -119,16 +122,52 @@ class MainAccountController extends Controller
         }
     }
     /**
-     * Helper to find Main Account (Type 1) balance from member's wallets
-     */
-    private function getMainWalletBalance(int $memberId): int
-    {
-        $wallets = $this->member->getWalletsByMemberId($memberId);
-        foreach ($wallets as $wallet) {
-            if ((int)$wallet['wallet_type_id'] === 1) {
-                return (int)$wallet['balance'];
-            }
-        }
-        return 0;
+ * Helper to find Main Account (Type 1) balance from member's wallets
+ */
+public function getMainWalletBalance(Request $request, Response $response): Response
+{
+    // 1. Get the member_id from query parameters
+    $queryParams = $request->getQueryParams();
+    $memberId = isset($queryParams['member_id']) ? (int)$queryParams['member_id'] : null;
+
+    if (!$memberId) {
+        return $this->jsonResponse($response, [
+            'status' => 'error',
+            'message' => 'Missing required parameter: member_id'
+        ], 400);
     }
+
+    // 2. Define the Main Account wallet type ID (Type 1)
+    $mainWalletTypeId = 1;
+
+    try {
+        // 3. Fetch the wallet from your model
+        $wallet = $this->walletModel->getWalletByMemberAndType($memberId, $mainWalletTypeId);
+
+        if (!$wallet) {
+            return $this->jsonResponse($response, [
+                'status' => 'error',
+                'message' => 'Main wallet not found for this member.'
+            ], 404);
+        }
+         //send message with the balance
+         $this->smsService->sendSMS($wallet["phone"],"Your main account balance is ".$wallet["balance"]);
+        // 4. Return the balance successfully
+        return $this->jsonResponse($response, [
+            'status' => 'success',
+            'data' => [
+                'member_id' => $memberId,
+                'wallet_type_id' => $mainWalletTypeId,
+                'balance' => (float)$wallet['balance']
+            ]
+        ], 200);
+
+    } catch (\Exception $e) {
+        // 5. Catch block using your exact error structure
+        return $this->jsonResponse($response, [
+            'status' => 'error',
+            'message' => 'Server processing breakdown: ' . $e->getMessage()
+        ], 500);
+    }
+}
 }
