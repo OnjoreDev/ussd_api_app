@@ -11,13 +11,7 @@ class Transaction extends Model
     /**
      * Records a new movement in the ledger.
      */
-    // In App\Models\Transaction.php
-    // In App\Models\Transaction.php
-
-    // In App\Models\Transaction.php
-
-    // Inside App\Models\Transaction.php
-
+  
     public function create(array $data): bool
     {
         // Table columns: member_id, wallet_type_id, type, amount, previous_balance, running_balance, reference, description
