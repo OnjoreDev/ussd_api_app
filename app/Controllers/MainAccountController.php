@@ -1,4 +1,5 @@
 <?php
+
 declare(strict_types=1);
 
 namespace App\Controllers;
@@ -19,8 +20,8 @@ class MainAccountController extends Controller
     private TransactionService $transactionService;
     private Member $member;
     private SmsService $smsService;
-    private MpesaService $mpesaService; // Added
-    private Mpesa $mpesaModel;         // Added
+    private MpesaService $mpesaService;
+    private Mpesa $mpesaModel;         
     private Wallet $walletModel;
 
     public function __construct(ContainerInterface $container)
@@ -29,25 +30,23 @@ class MainAccountController extends Controller
         $this->transactionService = $container->get(TransactionService::class);
         $this->member = $container->get(Member::class);
         $this->smsService = $container->get(SmsService::class);
-        $this->mpesaService = $container->get(MpesaService::class); // Instantiated
-        $this->mpesaModel = $container->get(Mpesa::class);         // Instantiated
+        $this->mpesaService = $container->get(MpesaService::class);
+        $this->mpesaModel = $container->get(Mpesa::class);        
         $this->walletModel = $container->get(Wallet::class);
     }
-
 
     /**
      * Processes an STK Push initialization deposit into the Main Wallet (ID 1).
      * Replaces an atomic immediate credit with an asynchronous transaction log flow.
      */
-
     public function deposit(Request $request, Response $response): Response
     {
         $data = $request->getParsedBody();
         $memberId = (int)($data['member_id'] ?? 0);
-        $amount = (int)($data['amount'] ?? 0); // Convert to float for M-Pesa accuracy
+        // CHANGED: Converted to float for M-Pesa and Ledger accuracy
+        $amount = (float)($data['amount'] ?? 0.0); 
 
         // 1. Basic Validation
-        // Your existing phone parameter must be captured here from the USSD Utility call
         if ($memberId <= 0 || $amount <= 0 || empty($data['phone'])) {
             return $this->jsonResponse($response, [
                 'status' => 'error', 
@@ -70,8 +69,8 @@ class MainAccountController extends Controller
         try {
             $this->logger->info("Initiating Main Deposit STK Push via USSD API trigger for Member ID: {$memberId}, Amount: {$amount}");
             $this->logger->info("DEBUG: Sending STK to Phone: " . $phone);
+            
             // 2. Trigger the Safaricom Daraja Gateway push prompt thread.
-            // Provide specific reference "Main Dep" and description "Main Wallet Fund"
             $stkResult = $this->mpesaService->initiateStkPush(
                 $phone, 
                 $amount, 
@@ -86,7 +85,7 @@ class MainAccountController extends Controller
                     'member_id'           => $memberId,
                     'wallet_type_id'      => $walletTypeId,
                     'amount'              => $amount,
-                    'phone_number'        => $phone,
+                    'phone_number'        => $phone, // Correctly intercepted and converted to 'phone' by our updated Mpesa model
                     'checkout_request_id' => $stkResult['CheckoutRequestID'],
                     'merchant_request_id' => $stkResult['MerchantRequestID']
                 ];
@@ -121,53 +120,62 @@ class MainAccountController extends Controller
             ], 500);
         }
     }
+
     /**
- * Helper to find Main Account (Type 1) balance from member's wallets
- */
-public function getMainWalletBalance(Request $request, Response $response): Response
-{
-    // 1. Get the member_id from query parameters
-    $queryParams = $request->getQueryParams();
-    $memberId = isset($queryParams['member_id']) ? (int)$queryParams['member_id'] : null;
+     * Helper to find Main Account (Type 1) balance from member's wallets
+     */
+    public function getMainWalletBalance(Request $request, Response $response): Response
+    {
+        // 1. Get the member_id from query parameters
+        $queryParams = $request->getQueryParams();
+        $memberId = isset($queryParams['member_id']) ? (int)$queryParams['member_id'] : null;
 
-    if (!$memberId) {
-        return $this->jsonResponse($response, [
-            'status' => 'error',
-            'message' => 'Missing required parameter: member_id'
-        ], 400);
-    }
-
-    // 2. Define the Main Account wallet type ID (Type 1)
-    $mainWalletTypeId = 1;
-
-    try {
-        // 3. Fetch the wallet from your model
-        $wallet = $this->walletModel->getWalletByMemberAndType($memberId, $mainWalletTypeId);
-
-        if (!$wallet) {
+        if (!$memberId) {
             return $this->jsonResponse($response, [
                 'status' => 'error',
-                'message' => 'Main wallet not found for this member.'
-            ], 404);
+                'message' => 'Missing required parameter: member_id'
+            ], 400);
         }
-         //send message with the balance
-         $this->smsService->sendSMS($wallet["phone"],"Your main account balance is ".$wallet["balance"]);
-        // 4. Return the balance successfully
-        return $this->jsonResponse($response, [
-            'status' => 'success',
-            'data' => [
-                'member_id' => $memberId,
-                'wallet_type_id' => $mainWalletTypeId,
-                'balance' => (float)$wallet['balance']
-            ]
-        ], 200);
 
-    } catch (\Exception $e) {
-        // 5. Catch block using your exact error structure
-        return $this->jsonResponse($response, [
-            'status' => 'error',
-            'message' => 'Server processing breakdown: ' . $e->getMessage()
-        ], 500);
+        // 2. Define the Main Account wallet type ID (Type 1)
+        $mainWalletTypeId = 1;
+
+        try {
+            // 3. Fetch the wallet from your model
+            $wallet = $this->walletModel->getWalletByMemberAndType($memberId, $mainWalletTypeId);
+
+            if (!$wallet) {
+                return $this->jsonResponse($response, [
+                    'status' => 'error',
+                    'message' => 'Main wallet not found for this member.'
+                ], 404);
+            }
+
+            // Safe fallback lookup string for phone targets if your wallet payload model isolates phone definitions
+            $smsTargetPhone = $wallet["phone"] ?? ($memberLookup['phone'] ?? null);
+
+            if ($smsTargetPhone) {
+                 $this->smsService->sendSMS($smsTargetPhone, "Your main account balance is KES " . $wallet["balance"]);
+            } else {
+                 $this->logger->warning("Could not send balance notification SMS for Member ID {$memberId}: Phone target unresolved.");
+            }
+
+            // 4. Return the balance successfully
+            return $this->jsonResponse($response, [
+                'status' => 'success',
+                'data' => [
+                    'member_id' => $memberId,
+                    'wallet_type_id' => $mainWalletTypeId,
+                    'balance' => (float)$wallet['balance']
+                ]
+            ], 200);
+
+        } catch (Exception $e) {
+            // 5. Catch block using your exact error structure
+            return $this->jsonResponse($response, [
+                'status' => 'error',
+                'message' => 'Server processing breakdown: ' . $e->getMessage()
+            ], 500);
+        }
     }
-}
 }

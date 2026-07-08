@@ -14,10 +14,11 @@ class Mpesa extends Model
      */
     public function createTransaction(array $data): bool
     {
+        // FIXED: Column name changed from phone_number to phone to match your SQL schema
         $sql = "INSERT INTO mpesa_transactions 
-                (member_id, wallet_type_id, amount, phone_number, checkout_request_id, merchant_request_id, status) 
+                (member_id, wallet_type_id, amount, phone, checkout_request_id, merchant_request_id, status) 
                 VALUES 
-                (:member_id, :wallet_type_id, :amount, :phone_number, :checkout_request_id, :merchant_request_id, 'pending')";
+                (:member_id, :wallet_type_id, :amount, :phone, :checkout_request_id, :merchant_request_id, 'pending')";
 
         $stmt = $this->pdo->prepare($sql);
 
@@ -25,7 +26,7 @@ class Mpesa extends Model
             ':member_id'           => (int) $data['member_id'],
             ':wallet_type_id'      => (int) $data['wallet_type_id'],
             ':amount'              => (float) $data['amount'],
-            ':phone_number'        => (string) $data['phone_number'],
+            ':phone'               => (string) $data['phone_number'], // Maps your controller's payload key into the 'phone' column
             ':checkout_request_id' => (string) $data['checkout_request_id'],
             ':merchant_request_id' => (string) $data['merchant_request_id']
         ]);

@@ -5,7 +5,6 @@ declare(strict_types=1);
 namespace App\Services;
 
 use GuzzleHttp\Client;
-use GuzzleHttp\Exception\GuzzleException;
 use GuzzleHttp\Exception\RequestException;
 use Monolog\Logger;
 use Exception;
@@ -35,13 +34,14 @@ class MpesaService
             'base_uri' => rtrim($mpesaBaseUrl, '/') . '/',
             'timeout'  => 30.0,
             'connect_timeout' => 30.0,
-            'verify'   => false, 
+            'verify'   => false, // Set to true in production with valid SSL certificates
         ]);
     }
 
-    public function initiateStkPush(string $phoneNumber, int|float $amount, string $accountReference, string $transactionDesc)
+    public function initiateStkPush(string $phoneNumber, int|float $amount, string $accountReference, string $transactionDesc): array
     {
         try {
+            $formattedPhone = $this->formatPhoneNumber($phoneNumber);
             $token = $this->generateAccessToken();
             $timestamp = date('YmdHis');
             $password = base64_encode($this->shortcode . $this->passkey . $timestamp);
@@ -52,9 +52,9 @@ class MpesaService
                 'Timestamp'         => $timestamp,
                 'TransactionType'   => 'CustomerPayBillOnline',
                 'Amount'            => (int)$amount,
-                'PartyA'            => $phoneNumber,
+                'PartyA'            => $formattedPhone,
                 'PartyB'            => $this->shortcode,
-                'PhoneNumber'       => $phoneNumber,
+                'PhoneNumber'       => $formattedPhone,
                 'CallBackURL'       => $this->callbackUrl,
                 'AccountReference'  => $accountReference,
                 'TransactionDesc'   => $transactionDesc
@@ -71,7 +71,8 @@ class MpesaService
             return json_decode($response->getBody()->getContents(), true);
 
         } catch (RequestException $e) {
-            $rawBody = $e->hasResponse() ? $e->getResponse()->getBody()->getContents() : 'No Response Body';
+            // Safely casting stream to string preserves compatibility across handlers
+            $rawBody = $e->hasResponse() ? (string)$e->getResponse()->getBody() : 'No Response Body';
             $this->logger->error('STK Push Failed. Reason: ' . $rawBody);
             throw new Exception('STK push initiation failed: ' . $rawBody);
         }
@@ -79,6 +80,8 @@ class MpesaService
 
     private function generateAccessToken(): string
     {
+        // Optional TODO: Wrap this with a caching layer (e.g., Predis or local cache adapter)
+        // using a key like 'mpesa_access_token' for 3300 seconds to minimize API round-trips.
         try {
             $credentials = base64_encode($this->consumerKey . ':' . $this->consumerSecret);
 
@@ -95,5 +98,23 @@ class MpesaService
             $this->logger->error('OAuth Failed: ' . $e->getMessage());
             throw new Exception('Authentication with Safaricom failed.');
         }
+    }
+
+    /**
+     * Normalizes Kenyan phone numbers to the 2547XXXXXXXX or 2541XXXXXXXX format required by Safaricom.
+     */
+    private function formatPhoneNumber(string $phone): string
+    {
+        $phone = preg_replace('/\D/', '', $phone); // Strip all non-digits
+
+        if (str_starts_with($phone, '0')) {
+            return '254' . substr($phone, 1);
+        }
+
+        if (str_starts_with($phone, '7') || str_starts_with($phone, '1')) {
+            return '254' . $phone;
+        }
+
+        return $phone;
     }
 }

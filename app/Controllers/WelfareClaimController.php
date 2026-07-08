@@ -23,8 +23,8 @@ class WelfareClaimController extends Controller
     private TransactionService $transactionService;
     private SmsService $smsService;
     private WelfareClaim $welfareClaim;
-    private MpesaService $mpesaService; // Added
-    private Mpesa $mpesaModel;         // Added
+    private MpesaService $mpesaService;
+    private Mpesa $mpesaModel;
 
     public function __construct(ContainerInterface $container)
     {
@@ -34,13 +34,10 @@ class WelfareClaimController extends Controller
         $this->transactionService = $container->get(TransactionService::class);
         $this->smsService = $container->get(SmsService::class);
         $this->welfareClaim = $container->get(WelfareClaim::class);
-        $this->mpesaService = $container->get(MpesaService::class); // Instantiated
-        $this->mpesaModel = $container->get(Mpesa::class);         // Instantiated
+        $this->mpesaService = $container->get(MpesaService::class);
+        $this->mpesaModel = $container->get(Mpesa::class);
     }
 
-    /**
-     * Processes an STK Push initialization deposit into the Welfare Wallet (ID 2).
-     */
     /**
      * Processes an STK Push initialization deposit into the Welfare Wallet (ID 2).
      * This replaces the immediate database balance logic with an asynchronous M-Pesa flow.
@@ -58,7 +55,8 @@ class WelfareClaimController extends Controller
         }
 
         $phone = (string) $data['phone'];
-        $amount = (int) $data['amount'];
+        // CHANGED: Converted to float for M-Pesa tracking and Ledger schema consistency
+        $amount = (float) $data['amount'];
         $memberId = (int) $data['member_id'];
         $walletTypeId = 2; // Hardcoded strictly to ID 2 for the Welfare account wallet structure
 
@@ -80,7 +78,7 @@ class WelfareClaimController extends Controller
                     'member_id'           => $memberId,
                     'wallet_type_id'      => $walletTypeId,
                     'amount'              => $amount,
-                    'phone_number'        => $phone,
+                    'phone_number'        => $phone, // Correctly intercepted and mapped to 'phone' by our updated Mpesa model
                     'checkout_request_id' => $stkResult['CheckoutRequestID'],
                     'merchant_request_id' => $stkResult['MerchantRequestID']
                 ];
@@ -115,11 +113,9 @@ class WelfareClaimController extends Controller
             ], 500);
         }
     }
-    // Add to WelfareClaimController.php
 
     public function getClaims(Request $request, Response $response): Response
     {
-        // Assuming member is identified via Auth/Bearer token or request params
         $user = $this->member->findByPhone($request->getQueryParams()['phone'] ?? '');
 
         if (!$user) {
@@ -148,7 +144,6 @@ class WelfareClaimController extends Controller
 
         $tracking = 'CLM-' . strtoupper(bin2hex(random_bytes(3)));
 
-        // No longer passing relationship here
         $success = $this->welfareClaim->create((int) $user['id'], $data['claim_type'], $tracking);
 
         if ($success) {
@@ -165,7 +160,6 @@ class WelfareClaimController extends Controller
         $user = $this->member->findByPhone($phone);
 
         if (!$user) {
-            // Log the search failure
             $this->logger->warning("Status check failed: Member not found for phone $phone");
             return $this->jsonResponse($response, ['status' => 'error', 'message' => 'Member not found'], 404);
         }
@@ -177,10 +171,8 @@ class WelfareClaimController extends Controller
             return $this->jsonResponse($response, ['status' => 'error', 'message' => 'No welfare claims found'], 404);
         }
 
-        // Prepare status message
         $message = "Your last welfare claim ({$claim['tracking_number']}) status is: " . strtoupper($claim['status']) . ".";
 
-        // Dispatch and Log
         if ($this->smsService->sendSMS($phone, $message)) {
             $this->logger->info("Status SMS sent successfully", ['phone' => $phone, 'tracking' => $claim['tracking_number']]);
         } else {

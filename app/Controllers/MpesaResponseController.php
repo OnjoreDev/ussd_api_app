@@ -49,11 +49,11 @@ class MpesaResponseController extends Controller
                     $metadata = $callbackData['CallbackMetadata']['Item'] ?? [];
                     $receiptNumber = $this->extractMetaValue($metadata, 'MpesaReceiptNumber');
                     
-                    // FIXED: Properly passing 'Credit' as the 4th argument to match the signature
+                    // FIXED: Changed parameter casting to (float) to respect precise cents allocation values
                     $ledgerSuccess = $this->transactionService->execute(
                         (int)$tx['member_id'],
                         (int)$tx['wallet_type_id'],
-                        (int)$tx['amount'],
+                        (float)$tx['amount'], 
                         'Credit', 
                         $checkoutRequestID,
                         'M-Pesa Deposit: ' . $receiptNumber

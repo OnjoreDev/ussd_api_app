@@ -24,10 +24,15 @@ class TransactionService
 
     /**
      * Executes an atomic financial transaction.
-     * @param int $amount Points to be debited/credited.
+     * * @param int $memberId
+     * @param int $walletTypeId
+     * @param float $amount Money points to be debited/credited (FIXED: int to float parameter casting)
      * @param string $type Either 'Credit' or 'Debit'.
+     * @param string $reference
+     * @param string $description
+     * @return bool
      */
-    public function execute(int $memberId, int $walletTypeId, int $amount, string $type, string $reference, string $description): bool
+    public function execute(int $memberId, int $walletTypeId, float $amount, string $type, string $reference, string $description): bool
     {
         try {
             $this->pdo->beginTransaction();
@@ -37,7 +42,8 @@ class TransactionService
             $stmt->execute([$memberId, $walletTypeId]);
             $wallet = $stmt->fetch();
 
-            $previousPoints = $wallet ? (int)$wallet['balance'] : 0;
+            // FIXED: Safe floating point extraction instead of strict int cast truncation
+            $previousPoints = $wallet ? (float)$wallet['balance'] : 0.0;
 
             // 2. Calculate New Balance (RAW POINTS - no multiplication here)
             $newPoints = ($type === 'Debit') ? ($previousPoints - $amount) : ($previousPoints + $amount);
