@@ -82,4 +82,14 @@ class LoanRequest extends Model
         $stmt = $this->pdo->prepare($sql);
         return $stmt->execute([$status, $adminId, $loanId]);
     }
+
+   /**
+     * Updates ONLY the status field, leaving approved_by completely untouched
+     */
+    public function updateWebhookStatus(int $loanId, string $status): bool
+    {
+        $sql = "UPDATE loan_requests SET status = ? WHERE id = ?";
+        $stmt = $this->pdo->prepare($sql);
+        return $stmt->execute([$status, $loanId]);
+    }
 }

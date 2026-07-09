@@ -62,6 +62,7 @@ class WelfareClaimController extends Controller
 
         try {
             $this->logger->info("Initiating Welfare Deposit STK Push via USSD API trigger for Member ID: {$memberId}, Amount: {$amount}");
+            $this->logger->info("DEBUG: Sending STK to Phone: " . $phone);
 
             // Trigger the Safaricom Daraja Gateway push using all 4 required arguments
             $stkResult = $this->mpesaService->initiateStkPush(

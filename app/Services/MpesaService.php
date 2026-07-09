@@ -9,7 +9,7 @@ use GuzzleHttp\Exception\RequestException;
 use Monolog\Logger;
 use Exception;
 
-class MpesaService 
+class MpesaService
 {
     private Logger $logger;
     private Client $client;
@@ -19,12 +19,19 @@ class MpesaService
     private string $passkey;
     private string $callbackUrl;
 
+    //variables for b2c
+    private string $b2cShortcode;
+    private string $initiatorName;
+    private string $initiatorPassword; // Encrypted security credential from Safaricom portal
+    private string $b2cResultUrl;
+    private string $b2cQueueUrl;
+
     public function __construct(Logger $logger)
     {
         $this->logger = $logger;
-        
+
         $mpesaBaseUrl = getenv('MPESA_BASE_URL') ?: ($_ENV['MPESA_BASE_URL'] ?? 'https://sandbox.safaricom.co.ke/');
-        
+
         $this->consumerKey    = getenv('MPESA_CONSUMER_KEY') ?: ($_ENV['MPESA_CONSUMER_KEY'] ?? '');
         $this->consumerSecret = getenv('MPESA_CONSUMER_SECRET') ?: ($_ENV['MPESA_CONSUMER_SECRET'] ?? '');
         $this->passkey        = getenv('MPESA_PASSKEY') ?: ($_ENV['MPESA_PASSKEY'] ?? '');
@@ -36,7 +43,14 @@ class MpesaService
             'connect_timeout' => 30.0,
             'verify'   => false, // Set to true in production with valid SSL certificates
         ]);
-    }
+
+        //Mpesa B2C configurations
+       $this->b2cShortcode      = getenv('MPESA_B2C_SHORTCODE') ?: ($_ENV['MPESA_B2C_SHORTCODE'] ?? '');
+        $this->initiatorName     = getenv('MPESA_INITIATOR_NAME') ?: ($_ENV['MPESA_INITIATOR_NAME'] ?? '');
+        $this->initiatorPassword = getenv('MPESA_SECURITY_CREDENTIAL') ?: ($_ENV['MPESA_SECURITY_CREDENTIAL'] ?? '');
+        $this->b2cResultUrl      = getenv('MPESA_B2C_RESULT_URL') ?: ($_ENV['MPESA_B2C_RESULT_URL'] ?? '');
+        $this->b2cQueueUrl       = getenv('MPESA_B2C_QUEUE_URL') ?: ($_ENV['MPESA_B2C_QUEUE_URL'] ?? '');
+    }    
 
     public function initiateStkPush(string $phoneNumber, int|float $amount, string $accountReference, string $transactionDesc): array
     {
@@ -69,7 +83,6 @@ class MpesaService
             ]);
 
             return json_decode($response->getBody()->getContents(), true);
-
         } catch (RequestException $e) {
             // Safely casting stream to string preserves compatibility across handlers
             $rawBody = $e->hasResponse() ? (string)$e->getResponse()->getBody() : 'No Response Body';
@@ -91,7 +104,7 @@ class MpesaService
                     'Accept'        => 'application/json',
                 ]
             ]);
-            
+
             $data = json_decode($response->getBody()->getContents(), true);
             return $data['access_token'];
         } catch (Exception $e) {
@@ -116,5 +129,48 @@ class MpesaService
         }
 
         return $phone;
+    }
+
+
+    /**
+     * Initiates an external M-Pesa B2C Loan Disbursal payout request.
+     */
+    public function initiateB2cPayout(string $phoneNumber, float $amount, string $loanId): array
+    // Use a combination of timestamp and random bytes to guarantee uniqueness
+    
+    {
+        try {
+            $formattedPhone = $this->formatPhoneNumber($phoneNumber);
+            $token = $this->generateAccessToken();
+            $uniqueId = date('YmdHis') . bin2hex(random_bytes(8));
+            $bodyArray = [
+                'OriginatorConversationID' => $uniqueId,
+                'InitiatorName'      => $this->initiatorName,
+                'SecurityCredential' => $this->initiatorPassword,
+                'CommandID'          => 'BusinessPayment', 
+                'Amount'             => (int)$amount,
+                'PartyA'             => $this->b2cShortcode,
+                'PartyB'             => $formattedPhone,
+                'Remarks'            => 'Loan Disbursal approved for ID: ' . $loanId,
+                'QueueTimeOutURL'    => $this->b2cQueueUrl,
+                'ResultURL'          => $this->b2cResultUrl,
+                'Occasion'           => 'LoanDisbursal'
+            ];
+
+            // FIXED: Updated endpoint from mpesa/b2c/v1/... to mpesa/b2c/v3/paymentrequest
+            $response = $this->client->request('POST', 'mpesa/b2c/v3/paymentrequest', [
+                'headers' => [
+                    'Authorization' => 'Bearer ' . $token,
+                    'Content-Type'  => 'application/json',
+                ],
+                'json' => $bodyArray,
+            ]);
+
+            return json_decode($response->getBody()->getContents(), true);
+        } catch (RequestException $e) {
+            $rawBody = $e->hasResponse() ? (string)$e->getResponse()->getBody() : 'No Response Body';
+            $this->logger->error('M-Pesa B2C Disbursal Failed. Reason: ' . $rawBody);
+            throw $e;
+        }
     }
 }

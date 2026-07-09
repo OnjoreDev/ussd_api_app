@@ -45,6 +45,9 @@ return function (App $app) {
 
         //PUBLIC MPESA ROUTE
         $group->post('/payment-hook', [MpesaResponseController::class, 'handleCallback']);
+        $group->post('/mpesa/b2c-callback', [MpesaResponseController::class, 'handleB2cCallback']); // NEW: B2C Success/Fail Payouts
+        $group->post('/mpesa/b2c-queue-timeout', [MpesaResponseController::class, 'handleB2cQueueTimeout']); // NEW: B2C Timeout Fail-safes
+        
 
         // 4. PROTECTED FINANCIAL OPERATIONS (Requires AuthMiddleware)
         $group->group('', function (RouteCollectorProxy $secure) {

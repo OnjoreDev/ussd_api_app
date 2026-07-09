@@ -32,6 +32,7 @@ class MpesaController extends Controller
         try {
             $body = $request->getParsedBody();
 
+            //if any of the fields is missing show the error in the json payload
             if (empty($body['phone_number']) || empty($body['amount']) || empty($body['member_id']) || empty($body['wallet_type_id'])) {
                 return $this->jsonResponse($response, [
                     'status' => 'error',
@@ -74,7 +75,7 @@ class MpesaController extends Controller
                 $transactionDesc
             );
 
-            $duration = round(microtime(true) - $startTime, 3);
+            $duration = round(microtime(true) - $startTime, 5);
             $this->logger->info("Safaricom API handshake finished in {$duration} seconds.");
 
             if (isset($stkResult['ResponseCode']) && (string)$stkResult['ResponseCode'] === '0') {
