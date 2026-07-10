@@ -132,6 +132,22 @@ class Member extends Model
         return (int)$stmt->fetchColumn() > 0;
     }
 
-    
+    /**
+     * Fetch a specific wallet record for a member by wallet type
+     */
+    public function getWalletByMemberAndType(int $memberId, int $walletTypeId): ?array
+    {
+        // Joined with wallet_types to ensure we can access wallet metadata if needed
+        $sql = "SELECT w.* 
+            FROM wallets w 
+            WHERE w.member_id = ? 
+            AND w.wallet_type_id = ? 
+            LIMIT 1";
 
+        $stmt = $this->pdo->prepare($sql);
+        $stmt->execute([$memberId, $walletTypeId]);
+
+        $result = $stmt->fetch(PDO::FETCH_ASSOC);
+        return $result ?: null;
     }
+}

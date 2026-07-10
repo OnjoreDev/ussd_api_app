@@ -39,7 +39,7 @@ class MpesaService
 
         $this->client = new Client([
             'base_uri' => rtrim($mpesaBaseUrl, '/') . '/',
-            'timeout'  => 30.0,
+            'timeout'  => 60.0,
             'connect_timeout' => 30.0,
             'verify'   => false, // Set to true in production with valid SSL certificates
         ]);

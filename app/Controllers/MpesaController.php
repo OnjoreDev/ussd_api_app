@@ -23,6 +23,7 @@ class MpesaController extends Controller
         $this->mpesaModel = $container->get(Mpesa::class);
     }
 
+
     /**
      * POST /api/v1/mpesa/stk-push
      * Initiates an STK Push and creates a pending database log transaction record
@@ -32,89 +33,77 @@ class MpesaController extends Controller
         try {
             $body = $request->getParsedBody();
 
-            //if any of the fields is missing show the error in the json payload
             if (empty($body['phone_number']) || empty($body['amount']) || empty($body['member_id']) || empty($body['wallet_type_id'])) {
                 return $this->jsonResponse($response, [
                     'status' => 'error',
-                    'message' => 'Missing required fields: phone_number, amount, member_id, and wallet_type_id are mandatory.'
+                    'message' => 'Missing required fields.'
                 ], 400);
             }
 
-            $rawPhone    = (string) $body['phone_number'];
-            $amount      = (float) $body['amount'];
-            $memberId    = (int) $body['member_id'];
-            $walletTypeId = (int) $body['wallet_type_id'];
-
-            // Fast Regex Parsing Logic
-            $cleanPhone = preg_replace('/[^0-9]/', '', $rawPhone);
-            if (preg_match('/^0(7|1)\d{8}$/', $cleanPhone)) {
-                $cleanPhone = '254' . substr($cleanPhone, 1);
-            } elseif (preg_match('/^(7|1)\d{8}$/', $cleanPhone)) {
-                $cleanPhone = '254' . $cleanPhone;
-            }
-
-            if (!preg_match('/^254(7|1)\d{8}$/', $cleanPhone)) {
+            $cleanPhone = $this->sanitizePhoneNumber($body['phone_number']);
+            if (!$cleanPhone) {
                 return $this->jsonResponse($response, [
                     'status' => 'error',
-                    'message' => 'Invalid Kenyan phone number format. Use 07XXXXXXXX, 254XXXXXXXXX, or +2547XXXXXXXX.'
+                    'message' => 'Invalid phone number format.'
                 ], 400);
             }
 
-            $accountReference = 'Mem' . $memberId;
-            $transactionDesc  = 'WalletType' . $walletTypeId;
+            $this->logger->info("Initiating STK Push for Member: {$body['member_id']}, Phone: {$cleanPhone}");
 
-            $this->logger->info("Attempting STK Push initiation for Member ID: {$memberId}, Amount: KES {$amount}, Parsed Phone: {$cleanPhone}");
-
-            // Track how long the Safaricom connection handoff takes
-            $startTime = microtime(true);
-            
+            // Call the service
             $stkResult = $this->mpesaService->initiateStkPush(
-                $cleanPhone, 
-                $amount, 
-                $accountReference, 
-                $transactionDesc
+                $cleanPhone,
+                (float)$body['amount'],
+                'Mem' . $body['member_id'],
+                'WalletType' . $body['wallet_type_id']
             );
 
-            $duration = round(microtime(true) - $startTime, 5);
-            $this->logger->info("Safaricom API handshake finished in {$duration} seconds.");
-
+            // Check specifically for Safaricom gateway acceptance
+            // 0 = Success, anything else indicates a failure at the gateway level
             if (isset($stkResult['ResponseCode']) && (string)$stkResult['ResponseCode'] === '0') {
-                
-                $dbPayload = [
-                    'member_id'           => $memberId,
-                    'wallet_type_id'      => $walletTypeId,
-                    'amount'              => $amount,
+
+                $this->mpesaModel->createTransaction([
+                    'member_id'           => (int)$body['member_id'],
+                    'wallet_type_id'      => (int)$body['wallet_type_id'],
+                    'amount'              => (float)$body['amount'],
                     'phone_number'        => $cleanPhone,
                     'checkout_request_id' => $stkResult['CheckoutRequestID'],
                     'merchant_request_id' => $stkResult['MerchantRequestID']
-                ];
-
-                $this->mpesaModel->createTransaction($dbPayload);
+                ]);
 
                 return $this->jsonResponse($response, [
                     'status'  => 'success',
-                    'message' => 'STK Push initiated successfully. Please enter your M-Pesa PIN promptly.',
-                    'data'    => [
-                        'MerchantRequestID' => $stkResult['MerchantRequestID'],
-                        'CheckoutRequestID' => $stkResult['CheckoutRequestID'],
-                        'CustomerMessage'   => $stkResult['CustomerMessage']
-                    ]
+                    'message' => 'Payment request sent. Please check your phone for the M-Pesa prompt.',
+                    'data'    => ['CheckoutRequestID' => $stkResult['CheckoutRequestID']]
                 ], 200);
             }
 
+            // Handle Rejections (e.g., User unreachable, invalid shortcode, etc.)
+            $errorDesc = $stkResult['ResponseDescription'] ?? 'Gateway rejected the request.';
+            $this->logger->error("STK Initiation rejected: " . $errorDesc);
+
             return $this->jsonResponse($response, [
                 'status'  => 'error',
-                'message' => 'Safaricom gateway rejected initialization parameters.',
-                'details' => $stkResult
+                'message' => 'M-Pesa payment initiation failed: ' . $errorDesc
             ], 400);
-
         } catch (Exception $e) {
-            $this->logger->error('STK Push Controller Error: ' . $e->getMessage());
-
+            $this->logger->error('STK Push Controller Exception: ' . $e->getMessage());
             return $this->jsonResponse($response, [
                 'status'  => 'error',
-                'message' => 'Processing error: ' . $e->getMessage()
+                'message' => 'An internal error occurred. Please try again later.'
             ], 500);
         }
+    }
+
+    /**
+     * Helper to keep controller clean
+     */
+    private function sanitizePhoneNumber(string $rawPhone): ?string
+    {
+        $clean = preg_replace('/[^0-9]/', '', $rawPhone);
+        if (preg_match('/^0(7|1)\d{8}$/', $clean)) return '254' . substr($clean, 1);
+        if (preg_match('/^(7|1)\d{8}$/', $clean)) return '254' . $clean;
+        if (preg_match('/^254(7|1)\d{8}$/', $clean)) return $clean;
+        return null;
     }
 }

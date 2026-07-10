@@ -134,7 +134,7 @@ class MemberController extends Controller
                 $msg .= ucfirst($w['wallet_name']) . ": {$symbol} " . number_format((float)$w['balance'], 0) . "\n";
             }
             // Send SMS
-            $this->smsService->sendSMS($phone, $msg);
+            //$this->smsService->sendSMS($phone, $msg);
         }
 
         return $this->jsonResponse($response, [
@@ -163,5 +163,58 @@ class MemberController extends Controller
         $hasRole = (bool) $this->member->hasRole((int)$member['id'], $roleName);
 
         return $this->jsonResponse($response, ['has_role' => $hasRole]);
+    }
+
+    /**********
+     * GET MEMBER INDIVIDUAL WALLET BALNCES
+     */
+    public function getMemberWelfareBalance(Request $request, Response $response): Response
+    {
+        return $this->getBalanceByWalletType($request, $response, 2, "Welfare Fund", true);
+    }
+
+    public function getMemberMainAccountBalance(Request $request, Response $response): Response
+    {
+        return $this->getBalanceByWalletType($request, $response, 1, "Main Account", true);
+    }
+
+    public function getMemberLoanBalance(Request $request, Response $response): Response
+    {
+        return $this->getBalanceByWalletType($request, $response, 4, "Loan Account", true);
+    }
+
+    public function getMemberChamaPointsBalance(Request $request, Response $response): Response
+    {
+        return $this->getBalanceByWalletType($request, $response, 3, "Chama Points", true);
+    }
+
+    public function getBalanceByWalletType(Request $request, Response $response, int $walletTypeId, string $label, bool $sendSms = false): Response
+    {
+        $phone = $request->getQueryParams()['phone'] ?? '';
+        $user = $this->member->findByPhone($phone);
+
+        if (!$user) {
+            return $this->jsonResponse($response, ['status' => 'error', 'message' => 'Member not found'], 404);
+        }
+
+        $wallet = $this->member->getWalletByMemberAndType((int)$user['id'], $walletTypeId);
+        $balance = $wallet ? (float)$wallet['balance'] : 0.00;
+        $formatted = number_format($balance, ($walletTypeId === 3 ? 0 : 2)); // Points (3) use 0 decimals, others use 2
+
+        // Send SMS with specific account labels
+        if ($sendSms) {
+            $currency = ($walletTypeId === 3) ? "Pts" : "KES";
+            $msg = "Jua Kali CBO Account Statement:\nAccount: {$label}\nBalance: {$currency} {$formatted}";
+            $this->smsService->sendSMS($phone, $msg);
+        }
+
+        return $this->jsonResponse($response, [
+            'status' => 'success',
+            'data' => [
+                'label' => $label,
+                'balance' => $balance,
+                'formatted' => $formatted
+            ]
+        ]);
     }
 }

@@ -47,7 +47,7 @@ return function (App $app) {
         $group->post('/payment-hook', [MpesaResponseController::class, 'handleCallback']);
         $group->post('/mpesa/b2c-callback', [MpesaResponseController::class, 'handleB2cCallback']); // NEW: B2C Success/Fail Payouts
         $group->post('/mpesa/b2c-queue-timeout', [MpesaResponseController::class, 'handleB2cQueueTimeout']); // NEW: B2C Timeout Fail-safes
-        
+
 
         // 4. PROTECTED FINANCIAL OPERATIONS (Requires AuthMiddleware)
         $group->group('', function (RouteCollectorProxy $secure) {
@@ -57,6 +57,10 @@ return function (App $app) {
             $secure->get('/member/balances', [MemberController::class, 'getBalances']);
             $secure->get('/member/find-by-phone/{phone}', [MemberController::class, 'findByPhone']);
             $secure->get('/member/has-role', [MemberController::class, 'checkRole']);
+            $secure->get('/member/balance/welfare', [MemberController::class, 'getMemberWelfareBalance']);
+            $secure->get('/member/balance/main', [MemberController::class, 'getMemberMainAccountBalance']);
+            $secure->get('/member/balance/loan', [MemberController::class, 'getMemberLoanBalance']);
+            $secure->get('/member/balance/chama', [MemberController::class, 'getMemberChamaPointsBalance']);
 
             // Membership Tiers CRUD Actions
             $secure->get('/membership-tiers', [MembershipTierController::class, 'index']);
@@ -64,7 +68,7 @@ return function (App $app) {
             $secure->post('/membership-tiers', [MembershipTierController::class, 'create']);
             $secure->put('/membership-tiers/{id}', [MembershipTierController::class, 'update']);
             $secure->delete('/membership-tiers/{id}', [MembershipTierController::class, 'delete']);
-            
+
             // Loan Operations
             $secure->post('/loan/request', [LoanController::class, 'requestLoan']);
             $secure->post('/loan/disburse', [LoanController::class, 'disburseLoan']);
@@ -81,7 +85,7 @@ return function (App $app) {
 
             // Main Account & Chama
             $secure->post('/main/deposit', [MainAccountController::class, 'deposit']);
-            $secure->get('/main/main-balance',[MainAccountController::class,'getMainWalletBalance']);
+            $secure->get('/main/main-balance', [MainAccountController::class, 'getMainWalletBalance']);
 
             // Chama Points Operations
             $secure->get('/chama/points/balance/{member_id}', [ChamaPointsController::class, 'getBalanceAction']);

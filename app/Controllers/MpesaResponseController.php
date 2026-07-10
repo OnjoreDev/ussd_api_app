@@ -129,7 +129,7 @@ class MpesaResponseController extends Controller
                 $this->loanModel->updateWebhookStatus($loanId, 'approved');
                 $this->logger->info("Loan Request ID {$loanId} status updated to approved successfully.");
             } else {
-                $this->logger->warning("B2C Payout succeeded but Loan ID could not be regex-parsed from remarks string: '{$remarks}'");
+                $this->logger->warning("B2C Payout succeeded but Loan ID could not be regex-parsed from remarks string");
             }
         } else {
             $this->logger->error("B2C Disbursal Failed with Code {$resultCode}: {$resultDesc}");
