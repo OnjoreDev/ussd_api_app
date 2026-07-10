@@ -39,85 +39,56 @@ class MainAccountController extends Controller
      * Processes an STK Push initialization deposit into the Main Wallet (ID 1).
      * Replaces an atomic immediate credit with an asynchronous transaction log flow.
      */
-    public function deposit(Request $request, Response $response): Response
+     /**
+     * Processes an STK Push initialization deposit into the Main Wallet (ID 1).
+     */
+     public function deposit(Request $request, Response $response): Response
     {
+        $this->logger->info("DEBUG: Received Payload: " . json_encode($request->getParsedBody()));
         $data = $request->getParsedBody();
         $memberId = (int)($data['member_id'] ?? 0);
-        // CHANGED: Converted to float for M-Pesa and Ledger accuracy
-        $amount = (float)($data['amount'] ?? 0.0); 
+        $amount = (float)($data['amount'] ?? 0.0);
+        $phone = (string)($data['phone'] ?? '');
 
-        // 1. Basic Validation
-        if ($memberId <= 0 || $amount <= 0 || empty($data['phone'])) {
-            return $this->jsonResponse($response, [
-                'status' => 'error', 
-                'message' => 'Invalid input parameters. Ensure member_id, amount, and phone are provided.'
-            ], 400);
+        if ($memberId <= 0 || $amount <= 0 || empty($phone)) {
+            return $this->jsonResponse($response, ['status' => 'error', 'message' => 'Invalid inputs'], 400);
         }
 
-        $phone = (string) $data['phone'];
-        $walletTypeId = 1; // Explicitly 1 for Main Wallet
+        $walletTypeId = 1; // Main
 
-        // Ensure member exists
-        $memberLookup = $this->member->findById($memberId);
-        if (!$memberLookup) {
+        // NEW: Prevent duplicate pushes by checking for pending transactions
+        if ($this->mpesaModel->hasPendingTransaction($memberId, $walletTypeId)) {
             return $this->jsonResponse($response, [
                 'status' => 'error', 
-                'message' => 'Member account not found.'
-            ], 404);
+                'message' => 'A transaction is already pending. Please wait for the M-Pesa prompt.'
+            ], 409);
         }
 
         try {
-            $this->logger->info("Initiating Main Deposit STK Push via USSD API trigger for Member ID: {$memberId}, Amount: {$amount}");
-            $this->logger->info("DEBUG: Sending STK to Phone: " . $phone);
-            
-            // 2. Trigger the Safaricom Daraja Gateway push prompt thread.
-            $stkResult = $this->mpesaService->initiateStkPush(
-                $phone, 
-                $amount, 
-                "Main Dep", 
-                "Main Wallet Fund"
-            );
+            $stkResult = $this->mpesaService->initiateStkPush($amount, $phone, [
+                'member_id'      => $memberId,
+                'wallet_type_id' => $walletTypeId,
+                'account_ref'    => 'Main-' . $memberId
+            ]);
 
-            // 3. If Safaricom accepts the request structure, track it as 'pending' inside the database
-            if (isset($stkResult['ResponseCode']) && $stkResult['ResponseCode'] === "0") {
-                
-                $dbPayload = [
+            $this->logger->info("DEBUG: Safaricom API Response: " . json_encode($stkResult));
+
+            if (isset($stkResult->CheckoutRequestID)) {
+                $this->mpesaModel->createTransaction([
                     'member_id'           => $memberId,
                     'wallet_type_id'      => $walletTypeId,
                     'amount'              => $amount,
-                    'phone_number'        => $phone, // Correctly intercepted and converted to 'phone' by our updated Mpesa model
-                    'checkout_request_id' => $stkResult['CheckoutRequestID'],
-                    'merchant_request_id' => $stkResult['MerchantRequestID']
-                ];
+                    'phone_number'        => $phone,
+                    'checkout_request_id' => $stkResult->CheckoutRequestID,
+                    'merchant_request_id' => $stkResult->MerchantRequestID
+                ]);
 
-                // Persist the transaction into mpesa_transactions table with its native 'pending' state flag
-                $this->mpesaModel->createTransaction($dbPayload);
-
-                return $this->jsonResponse($response, [
-                    'status'  => 'success',
-                    'message' => 'STK Push initiated successfully. Please enter your M-Pesa PIN on your phone.',
-                    'data'    => [
-                        'MerchantRequestID' => $stkResult['MerchantRequestID'],
-                        'CheckoutRequestID' => $stkResult['CheckoutRequestID'],
-                        'CustomerMessage'   => $stkResult['CustomerMessage']
-                    ]
-                ], 200);
+                return $this->jsonResponse($response, ['status' => 'success', 'data' => $stkResult]);
             }
 
-            // Handles scenarios where the API request structural validation fails downstream on Safaricom's side
-            return $this->jsonResponse($response, [
-                'status'  => 'error',
-                'message' => 'Safaricom gateway rejected initialization parameters.',
-                'details' => $stkResult
-            ], 400);
-
+            return $this->jsonResponse($response, ['status' => 'error', 'message' => 'Failed to initiate STK'], 400);
         } catch (Exception $e) {
-            $this->logger->error('Main Controller Deposit Initialization Error: ' . $e->getMessage());
-            
-            return $this->jsonResponse($response, [
-                'status'  => 'error',
-                'message' => 'Server processing breakdown: ' . $e->getMessage()
-            ], 500);
+            return $this->jsonResponse($response, ['status' => 'error', 'message' => $e->getMessage()], 500);
         }
     }
 

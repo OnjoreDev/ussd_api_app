@@ -42,76 +42,55 @@ class WelfareClaimController extends Controller
      * Processes an STK Push initialization deposit into the Welfare Wallet (ID 2).
      * This replaces the immediate database balance logic with an asynchronous M-Pesa flow.
      */
-    public function deposit(Request $request, Response $response): Response
+   public function deposit(Request $request, Response $response): Response
     {
         $data = $request->getParsedBody();
 
-        // Ensure we capture all necessary payload arguments from the USSD / Utility API wrapper call
         if (empty($data['phone']) || empty($data['amount']) || empty($data['member_id'])) {
             return $this->jsonResponse($response, [
                 'status' => 'error', 
-                'message' => 'Missing parameter inputs. phone, amount, and member_id are required.'
+                'message' => 'Missing parameter inputs.'
             ], 400);
         }
 
         $phone = (string) $data['phone'];
-        // CHANGED: Converted to float for M-Pesa tracking and Ledger schema consistency
         $amount = (float) $data['amount'];
         $memberId = (int) $data['member_id'];
-        $walletTypeId = 2; // Hardcoded strictly to ID 2 for the Welfare account wallet structure
+        $walletTypeId = 2; // Welfare
+
+        // NEW: Prevent duplicate pushes
+        if ($this->mpesaModel->hasPendingTransaction($memberId, $walletTypeId)) {
+            return $this->jsonResponse($response, [
+                'status' => 'error', 
+                'message' => 'A transaction is already pending. Please wait for the M-Pesa prompt.'
+            ], 409);
+        }
 
         try {
-            $this->logger->info("Initiating Welfare Deposit STK Push via USSD API trigger for Member ID: {$memberId}, Amount: {$amount}");
-            $this->logger->info("DEBUG: Sending STK to Phone: " . $phone);
+            $stkResult = $this->mpesaService->initiateStkPush($amount, $phone, [
+                'member_id'      => $memberId,
+                'wallet_type_id' => $walletTypeId,
+                'account_ref'    => 'Welfare-' . $memberId
+            ]);
 
-            // Trigger the Safaricom Daraja Gateway push using all 4 required arguments
-            $stkResult = $this->mpesaService->initiateStkPush(
-                $phone, 
-                $amount, 
-                "Welfare Dep",          // AccountReference (Argument 3)
-                "Welfare Contribution"  // TransactionDesc  (Argument 4)
-            );
+            $this->logger->info("DEBUG: Safaricom API Response: " . json_encode($stkResult));
 
-            // If Safaricom accepts the request, track it as 'pending' inside the database
-            if (isset($stkResult['ResponseCode']) && $stkResult['ResponseCode'] === "0") {
-                
-                $dbPayload = [
+            if (isset($stkResult->CheckoutRequestID)) {
+                $this->mpesaModel->createTransaction([
                     'member_id'           => $memberId,
                     'wallet_type_id'      => $walletTypeId,
                     'amount'              => $amount,
-                    'phone_number'        => $phone, // Correctly intercepted and mapped to 'phone' by our updated Mpesa model
-                    'checkout_request_id' => $stkResult['CheckoutRequestID'],
-                    'merchant_request_id' => $stkResult['MerchantRequestID']
-                ];
+                    'phone_number'        => $phone,
+                    'checkout_request_id' => $stkResult->CheckoutRequestID,
+                    'merchant_request_id' => $stkResult->MerchantRequestID
+                ]);
 
-                // Persist the transaction into mpesa_transactions table with its native 'pending' flag state
-                $this->mpesaModel->createTransaction($dbPayload);
-
-                return $this->jsonResponse($response, [
-                    'status'  => 'success',
-                    'message' => 'STK Push initiated successfully. Please enter your M-Pesa PIN on your phone.',
-                    'data'    => [
-                        'MerchantRequestID' => $stkResult['MerchantRequestID'],
-                        'CheckoutRequestID' => $stkResult['CheckoutRequestID'],
-                        'CustomerMessage'   => $stkResult['CustomerMessage']
-                    ]
-                ], 200);
+                return $this->jsonResponse($response, ['status' => 'success', 'data' => $stkResult]);
             }
 
-            // Handles scenarios where the API request structural validation fails downstream on Safaricom's side
-            return $this->jsonResponse($response, [
-                'status'  => 'error',
-                'message' => 'Safaricom gateway rejected initialization parameters.',
-                'details' => $stkResult
-            ], 400);
-
+            return $this->jsonResponse($response, ['status' => 'error', 'message' => 'Failed to initiate STK'], 400);
         } catch (Exception $e) {
-            $this->logger->error('Welfare Controller Deposit Initialization Error: ' . $e->getMessage());
-            
-            return $this->jsonResponse($response, [
-                'status'  => 'error',
-                'message' => 'Server processing breakdown: ' . $e->getMessage()
-            ], 500);
+            return $this->jsonResponse($response, ['status' => 'error', 'message' => $e->getMessage()], 500);
         }
     }
 

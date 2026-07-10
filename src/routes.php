@@ -45,8 +45,8 @@ return function (App $app) {
 
         //PUBLIC MPESA ROUTE
         $group->post('/payment-hook', [MpesaResponseController::class, 'handleCallback']);
-        $group->post('/mpesa/b2c-callback', [MpesaResponseController::class, 'handleB2cCallback']); // NEW: B2C Success/Fail Payouts
-        $group->post('/mpesa/b2c-queue-timeout', [MpesaResponseController::class, 'handleB2cQueueTimeout']); // NEW: B2C Timeout Fail-safes
+        // $group->post('/b2c-callback', [MpesaResponseController::class, 'handleB2cCallback']); // NEW: B2C Success/Fail Payouts
+        // $group->post('/b2c-queue-timeout', [MpesaResponseController::class, 'handleB2cQueueTimeout']); // NEW: B2C Timeout Fail-safes
 
 
         // 4. PROTECTED FINANCIAL OPERATIONS (Requires AuthMiddleware)
@@ -71,7 +71,7 @@ return function (App $app) {
 
             // Loan Operations
             $secure->post('/loan/request', [LoanController::class, 'requestLoan']);
-            $secure->post('/loan/disburse', [LoanController::class, 'disburseLoan']);
+            //$secure->post('/loan/disburse', [LoanController::class, 'disburseLoan']);
             $secure->get('/loan/status', [LoanController::class, 'getLoanStatus']);
 
             // Welfare Operations
@@ -96,7 +96,7 @@ return function (App $app) {
                 ->add(AgentMiddleware::class);
 
             //STKPush
-            $secure->post('/mpesa/stk-push', [MpesaController::class, 'initiateStk']);
+            $secure->post('/stk-push', [MpesaController::class, 'initiateStk']);
         })->add(AuthMiddleware::class);
     });
 };

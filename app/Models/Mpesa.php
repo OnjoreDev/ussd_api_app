@@ -14,11 +14,11 @@ class Mpesa extends Model
      */
     public function createTransaction(array $data): bool
     {
-        // FIXED: Column name changed from phone_number to phone to match your SQL schema
-        $sql = "INSERT INTO mpesa_transactions 
-                (member_id, wallet_type_id, amount, phone, checkout_request_id, merchant_request_id, status) 
-                VALUES 
-                (:member_id, :wallet_type_id, :amount, :phone, :checkout_request_id, :merchant_request_id, 'pending')";
+        // Use INSERT IGNORE to prevent the 1062 error if the ID already exists
+        $sql = "INSERT IGNORE INTO mpesa_transactions 
+            (member_id, wallet_type_id, amount, phone, checkout_request_id, merchant_request_id, status) 
+            VALUES 
+            (:member_id, :wallet_type_id, :amount, :phone, :checkout_request_id, :merchant_request_id, 'pending')";
 
         $stmt = $this->pdo->prepare($sql);
 
@@ -26,7 +26,7 @@ class Mpesa extends Model
             ':member_id'           => (int) $data['member_id'],
             ':wallet_type_id'      => (int) $data['wallet_type_id'],
             ':amount'              => (float) $data['amount'],
-            ':phone'               => (string) $data['phone_number'], // Maps your controller's payload key into the 'phone' column
+            ':phone'               => (string) $data['phone_number'],
             ':checkout_request_id' => (string) $data['checkout_request_id'],
             ':merchant_request_id' => (string) $data['merchant_request_id']
         ]);
@@ -69,5 +69,15 @@ class Mpesa extends Model
 
         $result = $stmt->fetch(\PDO::FETCH_ASSOC);
         return $result ?: null;
+    }
+
+    // Add to Mpesa.php
+    public function hasPendingTransaction(int $memberId, int $walletTypeId): bool
+    {
+        $stmt = $this->pdo->prepare("SELECT id FROM mpesa_transactions 
+                                 WHERE member_id = ? AND wallet_type_id = ? AND status = 'pending' 
+                                 LIMIT 1");
+        $stmt->execute([$memberId, $walletTypeId]);
+        return (bool) $stmt->fetch();
     }
 }
