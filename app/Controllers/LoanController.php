@@ -46,7 +46,9 @@ class LoanController extends Controller
             return $this->jsonResponse($response, ['status' => 'error', 'message' => 'Member not found'], 404);
         }
 
+        //if user already has a loan
         if ($this->loanRequest->hasPendingRequest((int) $member['id'])) {
+            $this->smsService->sendSMS($phone,"An active loan request already exists");
             return $this->jsonResponse($response, ['status' => 'error', 'message' => 'Active pending request exists.'], 409);
         }
 
