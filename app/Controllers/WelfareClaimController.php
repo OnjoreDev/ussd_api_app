@@ -38,62 +38,59 @@ class WelfareClaimController extends Controller
         $this->mpesaModel = $container->get(Mpesa::class);
     }
 
+   
     /**
-     * Processes an STK Push initialization deposit into the Welfare Wallet (ID 2).
-     * This replaces the immediate database balance logic with an asynchronous M-Pesa flow.
+     * Processes an STK Push initialization deposit into the Welfare Wallet (ID: 2)
      */
-   public function deposit(Request $request, Response $response): Response
+    public function deposit(Request $request, Response $response): Response
     {
         $data = $request->getParsedBody();
 
+        // 1. Validation
         if (empty($data['phone']) || empty($data['amount']) || empty($data['member_id'])) {
-            return $this->jsonResponse($response, [
-                'status' => 'error', 
-                'message' => 'Missing parameter inputs.'
-            ], 400);
+            return $this->jsonResponse($response, ['status' => 'error', 'message' => 'Missing required inputs'], 400);
         }
 
         $phone = (string) $data['phone'];
         $amount = (float) $data['amount'];
         $memberId = (int) $data['member_id'];
-        $walletTypeId = 2; // Welfare
+        $welfareWalletTypeId = 2; // Welfare Wallet ID as per your wallet_types table
 
-        // NEW: Prevent duplicate pushes
-        if ($this->mpesaModel->hasPendingTransaction($memberId, $walletTypeId)) {
+        // 2. Prevent duplicate pending transactions for the same wallet
+        if ($this->mpesaModel->hasPendingTransaction($memberId, $welfareWalletTypeId)) {
             return $this->jsonResponse($response, [
                 'status' => 'error', 
-                'message' => 'A transaction is already pending. Please wait for the M-Pesa prompt.'
+                'message' => 'You already have a pending welfare deposit. Please complete the M-Pesa prompt.'
             ], 409);
         }
 
         try {
+            // 3. Initiate STK Push via MpesaService
             $stkResult = $this->mpesaService->initiateStkPush($amount, $phone, [
                 'member_id'      => $memberId,
-                'wallet_type_id' => $walletTypeId,
+                'wallet_type_id' => $welfareWalletTypeId,
                 'account_ref'    => 'Welfare-' . $memberId
             ]);
 
-            $this->logger->info("DEBUG: Safaricom API Response: " . json_encode($stkResult));
-
-            if (isset($stkResult->CheckoutRequestID)) {
-                $this->mpesaModel->createTransaction([
-                    'member_id'           => $memberId,
-                    'wallet_type_id'      => $walletTypeId,
-                    'amount'              => $amount,
-                    'phone_number'        => $phone,
-                    'checkout_request_id' => $stkResult->CheckoutRequestID,
-                    'merchant_request_id' => $stkResult->MerchantRequestID
-                ]);
-
-                return $this->jsonResponse($response, ['status' => 'success', 'data' => $stkResult]);
+            // 4. Handle Daraja API Response
+            if (isset($stkResult['CheckoutRequestID'])) {
+                $this->logger->info("Welfare STK Push initiated for Member ID: $memberId", ['checkout_id' => $stkResult['CheckoutRequestID']]);
+                return $this->jsonResponse($response, [
+                    'status' => 'success', 
+                    'message' => 'Welfare deposit initiated',
+                    'data' => $stkResult
+                ], 200);
             }
 
-            return $this->jsonResponse($response, ['status' => 'error', 'message' => 'Failed to initiate STK'], 400);
-        } catch (Exception $e) {
-            return $this->jsonResponse($response, ['status' => 'error', 'message' => $e->getMessage()], 500);
+            $this->logger->error("Welfare STK Push failed for Member ID: $memberId", ['response' => $stkResult]);
+            return $this->jsonResponse($response, ['status' => 'error', 'message' => 'Could not initiate M-Pesa request'], 500);
+
+        } catch (\Exception $e) {
+            $this->logger->error("Welfare deposit controller error: " . $e->getMessage());
+            return $this->jsonResponse($response, ['status' => 'error', 'message' => 'Internal Server Error'], 500);
         }
     }
-
+    
     public function getClaims(Request $request, Response $response): Response
     {
         $user = $this->member->findByPhone($request->getQueryParams()['phone'] ?? '');

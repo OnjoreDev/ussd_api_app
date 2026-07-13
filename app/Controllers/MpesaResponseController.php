@@ -22,71 +22,76 @@ class MpesaResponseController extends Controller
         $this->transactionService = $container->get(TransactionService::class);
     }
 
-    /**
-     * Endpoint: POST /api/v1/payment-hook
-     * Safaricom hits this URL after the STK push process.
-     */
-    public function handleCallback(Request $request, Response $response): Response
+    public function handleCallBack(Request $request, Response $response): Response
     {
-        $payload = json_decode($request->getBody()->getContents(), true);
-        
-        // Ensure we have a valid callback structure
-        if (!isset($payload['Body']['stkCallback'])) {
-            return $response->withStatus(400);
+        $rawPayload = (string)$request->getBody();
+        $payload = json_decode($rawPayload, true);
+
+        // 1. LOG EVERYTHING: If you don't see this in your logs, Safaricom is NOT hitting your server
+        $this->logger->info("M-Pesa Callback Raw Data: " . $rawPayload);
+
+        // 2. IP Whitelisting (Optional: Disable if using ngrok/proxy to test)
+        // If testing on localhost/ngrok, REMOTE_ADDR might be the local proxy, not Safaricom.
+        // Comment this out if you're getting "Unauthorized" in your logs.
+        $clientIp = $request->getServerParams()['REMOTE_ADDR'] ?? '';
+        // $safaricomIps = ['196.201.214.200', ...]; 
+        // if (!in_array($clientIp, $safaricomIps)) { ... }
+
+        $stk = $payload['Body']['stkCallback'] ?? [];
+        if (empty($stk['CheckoutRequestID'])) {
+            $this->logger->error("M-Pesa callback invalid structure.");
+            return $this->jsonResponse($response, ['ResultCode' => 1, 'ResultDesc' => 'Invalid payload'], 400);
         }
 
-        $stkCallback = $payload['Body']['stkCallback'];
-        $checkoutRequestId = $stkCallback['CheckoutRequestID'];
-        $resultCode = (int)$stkCallback['ResultCode'];
+        $checkoutId = $stk['CheckoutRequestID'];
+        $resultCode = (int)($stk['ResultCode'] ?? 1);
 
-        // Logic for successful payment
+        // 3. Process Result
         if ($resultCode === 0) {
-            $metadata = $stkCallback['CallbackMetadata']['Item'] ?? [];
-            $receipt  = $this->extractMetadata($metadata, 'MpesaReceiptNumber');
-            $amount   = (float)$this->extractMetadata($metadata, 'Amount');
+            $metadata = $stk['CallbackMetadata']['Item'] ?? [];
+            $receipt = $this->extractReceipt($metadata);
 
-            // 1. Update status in mpesa_transactions table
-            $this->mpesaModel->updateTransactionStatus($checkoutRequestId, 'completed', $receipt);
+            $trans = $this->mpesaModel->findByCheckoutRequestId($checkoutId);
 
-            // 2. Fetch original transaction details to get member_id and wallet_type_id
-            $txn = $this->mpesaModel->findByCheckoutRequestId($checkoutRequestId);
-            
-            if ($txn) {
-                // 3. Update the Ledger via TransactionService
-                $this->transactionService->execute(
-                    (int)$txn['member_id'],
-                    (int)$txn['wallet_type_id'],
-                    $amount,
+            if ($trans) {
+                // Ensure we don't process the same transaction twice
+                if ($trans['status'] === 'completed') {
+                    return $this->jsonResponse($response, ['ResultCode' => 0, 'ResultDesc' => 'Already processed']);
+                }
+
+                $success = $this->transactionService->execute(
+                    (int)$trans['member_id'],
+                    (int)$trans['wallet_type_id'],
+                    (float)$trans['amount'],
                     'Credit',
                     $receipt,
-                    'M-Pesa STK Deposit'
+                    "M-Pesa STK Top-up: $receipt"
                 );
+
+                if ($success) {
+                    $this->mpesaModel->updateTransactionStatus($checkoutId, 'completed', $receipt);
+                    $this->logger->info("Payment SUCCESS for checkout: $checkoutId");
+                } else {
+                    $this->logger->error("CRITICAL: TransactionService failed for checkout: $checkoutId");
+                }
+            } else {
+                $this->logger->error("CRITICAL: No transaction record found for ID: $checkoutId");
             }
         } else {
-            // CAPTURE THE ERROR
-            $resultDesc = $stkCallback['ResultDesc'] ?? 'No description provided';
-            
-            // LOG IT TO YOUR APP LOGS
-            $this->logger->error("DEBUG: M-Pesa Transaction Failed for {$checkoutRequestId}. Code: {$resultCode}. Desc: {$resultDesc}");
-
-            // Log failure in mpesa_transactions table
-            $this->mpesaModel->updateTransactionStatus($checkoutRequestId, 'failed');
+            $this->mpesaModel->updateTransactionStatus($checkoutId, 'failed');
+            $this->logger->warning("Payment FAILED (Code $resultCode) for checkout: $checkoutId");
         }
 
-        // IMPORTANT: Always return 200 OK so Safaricom knows you received the data
-        return $response->withStatus(200);
+        return $this->jsonResponse($response, ['ResultCode' => 0, 'ResultDesc' => 'Success']);
     }
 
-    /**
-     * Helper to extract data from Safaricom's nested Item array
-     */
-    private function extractMetadata(array $items, string $name): ?string
+    private function extractReceipt(array $items): string
     {
         foreach ($items as $item) {
-            if ($item['Name'] === $name) {
+            if (isset($item['Name']) && ($item['Name'] === 'MpesaReceiptNumber')) {
                 return (string)$item['Value'];
             }
         }
-        return null;
+        return 'N/A';
     }
 }

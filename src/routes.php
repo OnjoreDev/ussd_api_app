@@ -20,6 +20,9 @@ use Slim\Routing\RouteCollectorProxy;
 
 return function (App $app) {
 
+    //mpesa response callback outside the auth group
+    $app->post('/api/v1/payment-hook', [MpesaResponseController::class, 'handleCallback']);
+
     $app->group('/api/v1', function (RouteCollectorProxy $group) {
 
         // 1. AUTHENTICATION (Public)
@@ -43,12 +46,6 @@ return function (App $app) {
         $group->get('/member/check-registration/{phone}', [MemberController::class, 'checkRegistration']);
         $group->get('/member/customer-care-details', [MemberController::class, 'getCustomerCareDetails']);
 
-        //PUBLIC MPESA ROUTE
-        $group->post('/payment-hook', [MpesaResponseController::class, 'handleCallback']);
-        // $group->post('/b2c-callback', [MpesaResponseController::class, 'handleB2cCallback']); // NEW: B2C Success/Fail Payouts
-        // $group->post('/b2c-queue-timeout', [MpesaResponseController::class, 'handleB2cQueueTimeout']); // NEW: B2C Timeout Fail-safes
-
-
         // 4. PROTECTED FINANCIAL OPERATIONS (Requires AuthMiddleware)
         $group->group('', function (RouteCollectorProxy $secure) {
 
@@ -71,7 +68,6 @@ return function (App $app) {
 
             // Loan Operations
             $secure->post('/loan/request', [LoanController::class, 'requestLoan']);
-            //$secure->post('/loan/disburse', [LoanController::class, 'disburseLoan']);
             $secure->get('/loan/status', [LoanController::class, 'getLoanStatus']);
 
             // Welfare Operations
@@ -95,8 +91,6 @@ return function (App $app) {
             $secure->post('/chama/points/withdraw', ChamaPointsController::class . 'withdrawPoints')
                 ->add(AgentMiddleware::class);
 
-            //STKPush
-            $secure->post('/stk-push', [MpesaController::class, 'initiateStk']);
         })->add(AuthMiddleware::class);
     });
 };
