@@ -80,4 +80,5 @@ class Mpesa extends Model
         $stmt->execute([$memberId, $walletTypeId]);
         return (bool) $stmt->fetch();
     }
+    
 }

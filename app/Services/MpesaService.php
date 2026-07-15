@@ -83,6 +83,57 @@ class MpesaService
 
         return $result;
     }
+    //function for bulk payments:
+    /**
+     * Initiates an M-Pesa B2C (Business to Consumer) payment.
+     */
+   
+    public function disburse(float $amount, string $phone, string $remarks, string $reference): array
+    {
+        $token = $this->getAccessToken();
+
+        // Format phone: ensure it is 254XXXXXXXXX
+        $formattedPhone = preg_replace('/^0/', '254', $phone);
+
+        $payload = [
+            "InitiatorName"      => $_ENV['MPESA_B2C_INITIATOR_NAME'],
+            "SecurityCredential" => $_ENV['MPESA_B2C_SECURITY_CREDENTIAL'],
+            "CommandID"          => "SalaryPayment",
+            "Amount"             => (int)$amount,
+            "PartyA"             => $_ENV['MPESA_SHORTCODE'],
+            "PartyB"             => $formattedPhone,
+            "Remarks"            => $remarks,
+            "QueueTimeOutURL"    => $_ENV['MPESA_B2C_TIMEOUT_URL'],
+            "ResultURL"          => $_ENV['MPESA_B2C_RESULT_URL'],
+            "Occassion"          => $reference,
+            "OriginatorConversationID" => bin2hex(random_bytes(16))
+
+        ];
+
+        $this->logger->info("DEBUG: Sending B2C Disbursement", ['payload' => $payload]);
+
+        try {
+            $response = $this->client->post('/mpesa/b2c/v3/paymentrequest', [
+                'headers' => [
+                    'Authorization' => 'Bearer ' . $token,
+                    'Content-Type'  => 'application/json'
+                ],
+                'json' => $payload
+            ]);
+
+            return json_decode($response->getBody()->getContents(), true);
+        } catch (\GuzzleHttp\Exception\RequestException $e) {
+            // Log the detailed error from Safaricom
+            $responseBody = $e->hasResponse() ? $e->getResponse()->getBody()->getContents() : $e->getMessage();
+            $this->logger->error("B2C Disbursement Failed: " . $responseBody);
+            
+            return [
+                'status' => 'error', 
+                'message' => 'Disbursement request failed.', 
+                'details' => json_decode($responseBody, true) ?? $responseBody
+            ];
+        }
+    }
     public function queryStkStatus(string $checkoutId): array
     {
         $token = $this->getAccessToken();

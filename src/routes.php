@@ -12,7 +12,6 @@ use App\Controllers\MainAccountController;
 use App\Controllers\ChamaPointsController;
 use App\Middleware\AuthMiddleware;
 use App\Controllers\MpesaResponseController;
-use App\Controllers\MpesaController;
 use App\Controllers\MembershipTierController;
 use App\Middleware\AgentMiddleware;
 use Slim\App;
@@ -20,8 +19,12 @@ use Slim\Routing\RouteCollectorProxy;
 
 return function (App $app) {
 
+    //USSD ROUTES
     //mpesa response callback outside the auth group
     $app->post('/api/v1/payment-hook', [MpesaResponseController::class, 'handleCallback']);
+    // Routes to handle the response from the b2c request
+    $app->post('/api/v1/b2c/result', [MpesaResponseController::class, 'handleB2CResult']);
+    $app->post('/api/v1/b2c/timeout', [MpesaResponseController::class, 'handleB2CTimeout']);
 
     $app->group('/api/v1', function (RouteCollectorProxy $group) {
 
@@ -69,6 +72,7 @@ return function (App $app) {
             // Loan Operations
             $secure->post('/loan/request', [LoanController::class, 'requestLoan']);
             $secure->get('/loan/status', [LoanController::class, 'getLoanStatus']);
+            $secure->post('/loan/disburse', [LoanController::class, 'disburseLoan']);
 
             // Welfare Operations
             $secure->get('/welfare/claims', [WelfareClaimController::class, 'getClaims']);
