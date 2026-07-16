@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Services;
 
 use App\Models\Mpesa;
+use App\Models\MpesaB2C;
 use GuzzleHttp\Client;
 use Monolog\Logger;
 
@@ -13,10 +14,13 @@ class MpesaService
     private Client $client;
     private Mpesa $mpesaModel;
     private Logger $logger;
+    private MpesaB2C $b2c;
 
-    public function __construct(Mpesa $mpesaModel, Logger $logger)
+
+    public function __construct(Mpesa $mpesaModel, Logger $logger, MpesaB2C $b2c)
     {
         $this->mpesaModel = $mpesaModel;
+        $this->b2c = $b2c;
         $this->client = new Client([
             'base_uri' => $_ENV['MPESA_BASE_URL'],
             'timeout'  => 10.0,
@@ -84,30 +88,40 @@ class MpesaService
         return $result;
     }
     //function for bulk payments:
+
+
     /**
      * Initiates an M-Pesa B2C (Business to Consumer) payment.
      */
-   
-    public function disburse(float $amount, string $phone, string $remarks, string $reference): array
+    public function disburse(float $amount, string $phone, string $remarks, string $reference, int $memberId): array
     {
         $token = $this->getAccessToken();
 
         // Format phone: ensure it is 254XXXXXXXXX
         $formattedPhone = preg_replace('/^0/', '254', $phone);
+        $originatorId = bin2hex(random_bytes(16));
+
+        // 1. Persist the transaction first as 'pending'
+        $this->b2c->createB2CTransaction([
+            'member_id'                  => $memberId,
+            'amount'                     => $amount,
+            'phone'                      => $formattedPhone,
+            'originator_conversation_id' => $originatorId,
+            'conversation_id'            => null // Will be updated after API call
+        ]);
 
         $payload = [
-            "InitiatorName"      => $_ENV['MPESA_B2C_INITIATOR_NAME'],
-            "SecurityCredential" => $_ENV['MPESA_B2C_SECURITY_CREDENTIAL'],
-            "CommandID"          => "SalaryPayment",
-            "Amount"             => (int)$amount,
-            "PartyA"             => $_ENV['MPESA_SHORTCODE'],
-            "PartyB"             => $formattedPhone,
-            "Remarks"            => $remarks,
-            "QueueTimeOutURL"    => $_ENV['MPESA_B2C_TIMEOUT_URL'],
-            "ResultURL"          => $_ENV['MPESA_B2C_RESULT_URL'],
-            "Occassion"          => $reference,
-            "OriginatorConversationID" => bin2hex(random_bytes(16))
-
+            "InitiatorName"            => $_ENV['MPESA_B2C_INITIATOR_NAME'],
+            "SecurityCredential"       => $_ENV['MPESA_B2C_SECURITY_CREDENTIAL'],
+            "CommandID"                => "BusinessPayment",
+            "Amount"                   => (int)$amount,
+            "PartyA"                   => $_ENV['MPESA_SHORTCODE'],
+            "PartyB"                   => $formattedPhone,
+            "Remarks"                  => $remarks,
+            "QueueTimeOutURL"          => $_ENV['MPESA_B2C_TIMEOUT_URL'],
+            "ResultURL"                => $_ENV['MPESA_B2C_RESULT_URL'],
+            "Occassion"                => $reference,
+            "OriginatorConversationID" => $originatorId
         ];
 
         $this->logger->info("DEBUG: Sending B2C Disbursement", ['payload' => $payload]);
@@ -121,15 +135,22 @@ class MpesaService
                 'json' => $payload
             ]);
 
-            return json_decode($response->getBody()->getContents(), true);
+            $result = json_decode($response->getBody()->getContents(), true);
+
+            // 2. If successful, link the returned ConversationID to our record
+            if (isset($result['ConversationID'])) {
+                $this->b2c->updateConversationId($originatorId, $result['ConversationID']);
+            }
+
+            return $result;
         } catch (\GuzzleHttp\Exception\RequestException $e) {
             // Log the detailed error from Safaricom
             $responseBody = $e->hasResponse() ? $e->getResponse()->getBody()->getContents() : $e->getMessage();
             $this->logger->error("B2C Disbursement Failed: " . $responseBody);
-            
+
             return [
-                'status' => 'error', 
-                'message' => 'Disbursement request failed.', 
+                'status'  => 'error',
+                'message' => 'Disbursement request failed.',
                 'details' => json_decode($responseBody, true) ?? $responseBody
             ];
         }

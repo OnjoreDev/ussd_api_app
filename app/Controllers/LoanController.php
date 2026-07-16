@@ -7,7 +7,6 @@ namespace App\Controllers;
 use App\Models\Member;
 use App\Models\LoanRequest;
 use App\Models\Mpesa;
-use App\Models\MpesaC2B;
 use App\Services\SmsService;
 use App\Services\TransactionService;
 use App\Services\MpesaService; // Injected Mpesa Service
@@ -23,7 +22,6 @@ class LoanController extends Controller
     private TransactionService $transactionService;
     private MpesaService $mpesaService; // Declared property
     private Mpesa $mpesaModel;
-    private MpesaC2B $c2b;
 
     public function __construct(ContainerInterface $container)
     {
@@ -34,7 +32,6 @@ class LoanController extends Controller
         $this->transactionService = $container->get(TransactionService::class);
         $this->mpesaService = $container->get(MpesaService::class); // Injected via container
         $this->mpesaModel = $container->get(Mpesa::class);
-        $this->c2b = $container->get(MpesaC2B::class);
     }
 
     /**
@@ -110,50 +107,58 @@ class LoanController extends Controller
      * 3. Records a debit transaction in the ledger (as a negative balance).
      * 4. Triggers the M-Pesa API.
      */
-    public function disburseLoan(Request $request, Response $response): Response
-    {
-        $data = $request->getParsedBody();
-        $loanId = (int) ($data['loan_id'] ?? 0);
-        $adminId = (int) ($data['admin_id'] ?? 0);
+   /**
+ * Handles the loan disbursement request from the admin dashboard.
+ */
+public function disburseLoan(Request $request, Response $response): Response
+{
+    $data = $request->getParsedBody();
+    $loanId = (int) ($data['loan_id'] ?? 0);
+    $adminId = (int) ($data['admin_id'] ?? 0);
 
-        $loan = $this->loanRequest->findById($loanId);
+    // 1. Retrieve and validate the loan request
+    $loan = $this->loanRequest->findById($loanId);
 
-        // Only allow starting from 'pending'
-        if (!$loan || $loan['status'] !== 'pending') {
-            return $this->jsonResponse($response, ['status' => 'error', 'message' => 'Loan not found or not pending.'], 400);
-        }
-
-        $member = $this->member->findById((int)$loan['member_id']);
-        $reference = "LOAN_" . $loanId . "_" . time();
-        $originatorId = bin2hex(random_bytes(16));
-
-        $result = $this->mpesaService->disburse((float)$loan['amount'], $member['phone'], "Loan", $reference);
-
-        if (isset($result['ConversationID'])) {
-            // 1. Log the B2C transaction to your database
-            $this->c2b->createB2CTransaction([
-                'member_id' => $loan['member_id'],
-                'amount'    => (float)$loan['amount'],
-                'phone'     => $member['phone'],
-                'reference' => $reference,
-                'originator_conversation_id' => $originatorId,
-                'conversation_id' => $result['ConversationID']
-            ]);
-
-            // 2. Update loan status to 'approved' (since 'processing' doesn't exist)
-            // This signifies the loan is "in flight" via M-Pesa
-            $this->loanRequest->updateStatus($loanId, 'approved', [
-                'conversation_id' => $result['ConversationID'],
-                'approved_by' => $adminId
-            ]);
-
-            return $this->jsonResponse($response, [
-                'status' => 'success',
-                'message' => 'Disbursement initiated',
-                'conversation_id' => $result['ConversationID']
-            ]);
-        }
-
-        return $this->jsonResponse($response, ['status' => 'error', 'message' => 'M-Pesa API failure'], 500);
+    if (!$loan || $loan['status'] !== 'pending') {
+        return $this->jsonResponse($response, ['status' => 'error', 'message' => 'Loan not found or not pending.'], 400);
     }
+
+    // 2. Retrieve member details
+    $member = $this->member->findById((int)$loan['member_id']);
+    $reference = "LOAN_" . $loanId . "_" . time();
+
+    // 3. Initiate Disbursement via MpesaService
+    // We pass the member_id here so the service can persist the transaction record to the DB
+    $result = $this->mpesaService->disburse(
+        (float)$loan['amount'], 
+        $member['phone'], 
+        "Loan", 
+        $reference, 
+        (int)$loan['member_id']
+    );
+
+    // 4. Handle API Response
+    // If successful, M-Pesa returns a ConversationID
+    if (isset($result['ConversationID'])) {
+        
+        // Update local loan status to 'approved' to indicate the transaction is in-flight
+        $this->loanRequest->updateStatus($loanId, 'approved', [
+            'conversation_id' => $result['ConversationID'],
+            'approved_by' => $adminId
+        ]);
+
+        return $this->jsonResponse($response, [
+            'status' => 'success',
+            'message' => 'Disbursement initiated successfully',
+            'conversation_id' => $result['ConversationID']
+        ]);
+    }
+
+    // 5. Handle Failures (e.g., Security Credential Error 8006)
+    return $this->jsonResponse($response, [
+        'status' => 'error', 
+        'message' => 'M-Pesa API failure', 
+        'details' => $result['details'] ?? 'Check logs for further information'
+    ], 500);
+}
 }

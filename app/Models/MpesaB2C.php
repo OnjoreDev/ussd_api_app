@@ -6,7 +6,7 @@ namespace App\Models;
 
 use PDO;
 
-class MpesaC2B extends Model
+class MpesaB2C extends Model
 {
 
     //insert records into the c2b db table
@@ -47,6 +47,19 @@ class MpesaC2B extends Model
             'status'          => $status,
             'result_data'     => json_encode($resultData),
             'conversation_id' => $conversationId
+        ]);
+    }
+    
+    public function updateConversationId(string $originatorId, string $conversationId): bool
+    {
+        $sql = "UPDATE mpesa_b2c_transactions 
+                SET conversation_id = :conversation_id 
+                WHERE originator_conversation_id = :originator_id";
+
+        $stmt = $this->pdo->prepare($sql);
+        return $stmt->execute([
+            'conversation_id' => $conversationId,
+            'originator_id'   => $originatorId
         ]);
     }
     /**

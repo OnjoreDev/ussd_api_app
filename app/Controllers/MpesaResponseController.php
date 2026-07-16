@@ -8,7 +8,7 @@ use App\Models\LoanRequest;
 use App\Models\Mpesa;
 use App\Services\TransactionService;
 use Psr\Container\ContainerInterface;
-use App\Models\MpesaC2B;
+use App\Models\MpesaB2C;
 use Psr\Http\Message\ResponseInterface as Response;
 use Psr\Http\Message\ServerRequestInterface as Request;
 
@@ -16,7 +16,7 @@ class MpesaResponseController extends Controller
 {
     private Mpesa $mpesaModel;
     private TransactionService $transactionService;
-    private MpesaC2B $c2b;
+    private MpesaB2C $b2c;
     private LoanRequest $loanRequest;
 
     public function __construct(ContainerInterface $container)
@@ -24,7 +24,7 @@ class MpesaResponseController extends Controller
         parent::__construct($container);
         $this->mpesaModel = $container->get(Mpesa::class);
         $this->transactionService = $container->get(TransactionService::class);
-        $this->c2b = $container->get(MpesaC2B::class);
+        $this->b2c = $container->get(MpesaB2C::class);
         $this->loanRequest = $container->get(LoanRequest::class);
     }
 
@@ -92,57 +92,111 @@ class MpesaResponseController extends Controller
     }
 
 
+
     /**
      * Handles the B2C Result callback from Safaricom.
-     * Updates the transaction status based on the ResultCode.
-     * * @param Request $request
-     * @param Response $response
-     * @return Response
+     * Updates the loan status and records the disbursement as a credit in the ledger.
      */
- public function handleB2CResult(Request $request, Response $response): Response
-{
-    $payload = json_decode($request->getBody()->getContents(), true);
-    $resultData = $payload['Result'] ?? null;
+    public function handleB2CResult(Request $request, Response $response): Response
+    {
+        $payload = json_decode($request->getBody()->getContents(), true);
+        $resultData = $payload['Result'] ?? null;
 
-    if (!$resultData) return $response->withStatus(400);
+        if (!$resultData) return $response->withStatus(400);
 
-    $conversationId = $resultData['ConversationID'];
-    $resultCode = $resultData['ResultCode']; // 0 means Success
+        $conversationId = $resultData['ConversationID'];
+        $originatorId = $resultData['OriginatorConversationID']; // Use this for safer lookups
+        $resultCode = (int)$resultData['ResultCode'];
 
-    // 1. Find the loan by conversation_id
-    $loan = $this->loanRequest->findByConversationId($conversationId);
-    
-    if ($resultCode == 0) {
-        // SUCCESS: Mark loan as cleared or disbursed
-        $this->loanRequest->updateStatus($loan['id'], 'cleared', [
-            'transaction_id' => $resultData['TransactionID']
-        ]);
-        
-        // Update your mpesa_b2c_transactions table
-        $this->c2b->updateB2CTransaction($conversationId, 'success', $resultData);
-    } else {
-        // FAILED: Mark loan as rejected or pending
-        $this->loanRequest->updateStatus($loan['id'], 'rejected', ['error' => $resultData['ResultDesc']]);
-        $this->c2b->updateB2CTransaction($conversationId, 'failed', $resultData);
+        // Use OriginatorID to find the record because it's guaranteed to exist from the start
+        $transaction = $this->b2c->findByOriginatorId($originatorId);
+
+        if (!$transaction) {
+            $this->logger->error("B2C Callback: Transaction not found for OriginatorID: $originatorId");
+            return $response->withStatus(200); // Acknowledge to stop retries
+        }
+
+        // Now update the record
+        $status = ($resultCode === 0) ? 'success' : 'failed';
+        $this->b2c->updateB2CTransaction($conversationId, $status, $resultData);
+
+        // Update Loan Status
+        $loan = $this->loanRequest->findByConversationId($conversationId);
+
+        if ($resultCode === 0 && $loan) {
+            // SUCCESS: Mark loan as cleared
+            $this->loanRequest->updateStatus($loan['id'], 'cleared', [
+                'transaction_id' => $resultData['ResultParameters']['ResultParameter'][1]['Value'] ?? 'N/A'
+            ]);
+
+            // RECORD CREDIT IN LEDGER:
+            // This logs the disbursement as a Credit to the member's account.
+            // Using the TransactionService ensures balance integrity and audit logging.
+            $this->transactionService->execute(
+                (int)$loan['member_id'],
+                (int)$loan['wallet_type_id'],
+                (float)$loan['amount'],
+                'Credit',
+                $resultData['TransactionID'] ?? 'B2C_' . $conversationId,
+                "Loan Disbursement Credit: Ref " . $loan['id']
+            );
+        } elseif ($loan) {
+            // FAILED: Mark loan as rejected
+            $this->loanRequest->updateStatus($loan['id'], 'rejected', [
+                'error' => $resultData['ResultDesc'] ?? 'Unknown Error'
+            ]);
+        }
+
+        return $this->jsonResponse($response, ['ResultCode' => 0, 'ResultDesc' => 'Accepted']);
     }
-
-    return $response->withStatus(200);
-}
     /**
      * Handles the B2C Timeout callback from Safaricom.
-     * Triggered if the request couldn't be queued by Safaricom.
+     * Triggered if M-Pesa cannot process the request within the expected timeframe.
      */
     public function handleB2CTimeout(Request $request, Response $response): Response
     {
+        // 1. Decode payload
         $data = $request->getParsedBody();
         $this->logger->warning("B2C Timeout Callback Received", ['payload' => $data]);
 
-        // Logic:
-        // 1. This means the request never reached the processing stage.
-        // 2. Identify the transaction using the request ID or conversation ID.
-        // 3. Update status to 'failed' or 'timed_out'.
-        // 4. Optionally, notify the admin to manually retry or investigate.
+        $result = $data['Result'] ?? [];
+        $originatorId = $result['OriginatorConversationID'] ?? null;
 
+        // 2. Validate OriginatorID and find the transaction in your DB
+        if ($originatorId) {
+            $transaction = $this->b2c->findByOriginatorId($originatorId);
+
+            if ($transaction) {
+                // 3. Update the transaction status to 'failed'
+                // We use the ConversationID from the callback if present, 
+                // otherwise, we use a placeholder to mark the record as failed.
+                $conversationId = $result['ConversationID'] ?? 'TIMEOUT_NO_CONV';
+
+                $this->b2c->updateB2CTransaction(
+                    $conversationId,
+                    'failed',
+                    $result
+                );
+
+                // 4. Update the associated Loan record status to 'rejected' (or 'pending' for retry)
+                // This assumes the conversation_id was linked during the initial disburse()
+                $loan = $this->loanRequest->findByConversationId($conversationId);
+                if ($loan) {
+                    $this->loanRequest->updateStatus($loan['id'], 'rejected', [
+                        'error' => 'B2C Disbursement Timed Out: ' . ($result['ResultDesc'] ?? 'No description')
+                    ]);
+                }
+
+                // 5. Critical Alert for Security issues (ResultCode 8006)
+                if (($result['ResultCode'] ?? 0) === 8006) {
+                    $this->logger->critical("URGENT: B2C Security Credentials are locked. Manual intervention required on Daraja Portal.");
+                }
+            } else {
+                $this->logger->error("B2C Timeout: No transaction found for OriginatorID: $originatorId");
+            }
+        }
+
+        // 6. Always acknowledge receipt to Safaricom to prevent redundant retries
         $payload = [
             'ResultCode' => 0,
             'ResultDesc' => 'Service accepted successfully'
@@ -151,8 +205,6 @@ class MpesaResponseController extends Controller
         $response->getBody()->write(json_encode($payload));
         return $response->withHeader('Content-Type', 'application/json');
     }
-
-
 
     private function extractReceipt(array $items): string
     {
