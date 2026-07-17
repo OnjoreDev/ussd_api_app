@@ -8,6 +8,7 @@ use App\Models\Mpesa;
 use App\Models\MpesaB2C;
 use GuzzleHttp\Client;
 use Monolog\Logger;
+use GuzzleHttp\Exception\RequestException;
 
 class MpesaService
 {
@@ -87,32 +88,58 @@ class MpesaService
 
         return $result;
     }
-    //function for bulk payments:
-
 
     /**
      * Initiates an M-Pesa B2C (Business to Consumer) payment.
      */
+    
+    private function getEncryptedCredential(): string
+    {
+        // Construct the absolute path using the defined constant
+        $certPath = PROJECT_ROOT . DIRECTORY_SEPARATOR . $_ENV['MPESA_CERT_PATH'];
+
+        // Ensure the path uses the correct OS-specific directory separators
+        $certPath = str_replace(['/', '\\'], DIRECTORY_SEPARATOR, $certPath);
+
+        if (!file_exists($certPath)) {
+            $this->logger->error("Certificate file not found at path: " . $certPath);
+            throw new \RuntimeException("M-Pesa B2C Certificate file missing.");
+        }
+
+        $pubKey = file_get_contents($certPath);
+        $password = $_ENV['MPESA_B2C_INITIATOR_PASSWORD'];
+
+        $encrypted = '';
+        if (openssl_public_encrypt($password, $encrypted, $pubKey, OPENSSL_PKCS1_PADDING)) {
+            return base64_encode($encrypted);
+        }
+
+        throw new \RuntimeException("Failed to encrypt security credential.");
+    }
+    /**
+     * Initiates an M-Pesa B2C payment
+     */
     public function disburse(float $amount, string $phone, string $remarks, string $reference, int $memberId): array
     {
         $token = $this->getAccessToken();
-
-        // Format phone: ensure it is 254XXXXXXXXX
         $formattedPhone = preg_replace('/^0/', '254', $phone);
         $originatorId = bin2hex(random_bytes(16));
 
-        // 1. Persist the transaction first as 'pending'
+        // Persist transaction record
         $this->b2c->createB2CTransaction([
-            'member_id'                  => $memberId,
-            'amount'                     => $amount,
-            'phone'                      => $formattedPhone,
+            'member_id' => $memberId,
+            'amount' => $amount,
+            'phone' => $formattedPhone,
             'originator_conversation_id' => $originatorId,
-            'conversation_id'            => null // Will be updated after API call
+            'conversation_id' => null
         ]);
+
+        // Use the new dynamic encryption method
+        $securityCredential = $this->getEncryptedCredential();
 
         $payload = [
             "InitiatorName"            => $_ENV['MPESA_B2C_INITIATOR_NAME'],
-            "SecurityCredential"       => $_ENV['MPESA_B2C_SECURITY_CREDENTIAL'],
+            "SecurityCredential"       => $securityCredential,
             "CommandID"                => "BusinessPayment",
             "Amount"                   => (int)$amount,
             "PartyA"                   => $_ENV['MPESA_SHORTCODE'],
@@ -124,7 +151,7 @@ class MpesaService
             "OriginatorConversationID" => $originatorId
         ];
 
-        $this->logger->info("DEBUG: Sending B2C Disbursement", ['payload' => $payload]);
+        $this->logger->info("Sending B2C Disbursement", ['payload' => $payload]);
 
         try {
             $response = $this->client->post('/mpesa/b2c/v3/paymentrequest', [
@@ -137,24 +164,18 @@ class MpesaService
 
             $result = json_decode($response->getBody()->getContents(), true);
 
-            // 2. If successful, link the returned ConversationID to our record
             if (isset($result['ConversationID'])) {
                 $this->b2c->updateConversationId($originatorId, $result['ConversationID']);
             }
 
             return $result;
-        } catch (\GuzzleHttp\Exception\RequestException $e) {
-            // Log the detailed error from Safaricom
+        } catch (RequestException $e) {
             $responseBody = $e->hasResponse() ? $e->getResponse()->getBody()->getContents() : $e->getMessage();
             $this->logger->error("B2C Disbursement Failed: " . $responseBody);
-
-            return [
-                'status'  => 'error',
-                'message' => 'Disbursement request failed.',
-                'details' => json_decode($responseBody, true) ?? $responseBody
-            ];
+            return ['status' => 'error', 'details' => $responseBody];
         }
     }
+
     public function queryStkStatus(string $checkoutId): array
     {
         $token = $this->getAccessToken();

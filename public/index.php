@@ -9,6 +9,8 @@ date_default_timezone_set('Africa/Nairobi');
 
 require_once __DIR__ . '/../vendor/autoload.php';
 
+define('PROJECT_ROOT', realpath(__DIR__ . '/..'));
+
 // Instantiate PHP-DI ContainerBuilder
 $containerBuilder = new ContainerBuilder();
 
