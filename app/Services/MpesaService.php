@@ -74,6 +74,7 @@ class MpesaService
 
         $result = json_decode($response->getBody()->getContents(), true);
 
+        //create record in the database
         if (isset($result['CheckoutRequestID'])) {
             $this->mpesaModel->createTransaction([
                 'member_id'           => $meta['member_id'],

@@ -74,11 +74,13 @@ class Mpesa extends Model
     // Add to Mpesa.php
     public function hasPendingTransaction(int $memberId, int $walletTypeId): bool
     {
+        // Check for pending transactions created in the last 5 minutes
         $stmt = $this->pdo->prepare("SELECT id FROM mpesa_transactions 
-                                 WHERE member_id = ? AND wallet_type_id = ? AND status = 'pending' 
-                                 LIMIT 1");
+                             WHERE member_id = ? AND wallet_type_id = ? 
+                             AND status = 'pending' 
+                             AND created_at > NOW() - INTERVAL 5 MINUTE
+                             LIMIT 1");
         $stmt->execute([$memberId, $walletTypeId]);
         return (bool) $stmt->fetch();
     }
-    
 }

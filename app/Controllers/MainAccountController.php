@@ -35,10 +35,11 @@ class MainAccountController extends Controller
         $this->walletModel = $container->get(Wallet::class);
     }
 
-   /**
+    /**
      * Processes an STK Push initialization deposit into the Main Wallet
      */
-   public function deposit(Request $request, Response $response): Response
+    
+    public function deposit(Request $request, Response $response): Response
     {
         $data = $request->getParsedBody();
 
@@ -55,8 +56,8 @@ class MainAccountController extends Controller
         // 2. Prevent duplicate pending transactions
         if ($this->mpesaModel->hasPendingTransaction($memberId, $mainWalletTypeId)) {
             return $this->jsonResponse($response, [
-                'status' => 'error', 
-                'message' => 'You have a pending transaction. Please complete it on your phone.'
+                'status' => 'error',
+                'message' => 'A transaction is already pending on your phone. Please complete it to proceed.'
             ], 409);
         }
 
@@ -71,24 +72,29 @@ class MainAccountController extends Controller
             // 4. Handle Daraja API Response
             if (isset($stkResult['CheckoutRequestID'])) {
                 $this->logger->info("STK Push initiated for Member ID: $memberId", ['checkout_id' => $stkResult['CheckoutRequestID']]);
-                
-                // Return success immediately to the USSD user
+
                 return $this->jsonResponse($response, [
-                    'status' => 'success', 
-                    'message' => 'STK Push initiated. Please check your phone for the prompt.'
+                    'status' => 'success',
+                    'message' => 'M-Pesa prompt sent. Please enter your PIN to complete the deposit.'
                 ], 200);
             }
 
-            // 5. Handle Gateway Errors
+            // 5. Handle Specific Gateway Errors from $stkResult
+            $errorMessage = $stkResult['errorMessage'] ?? $stkResult['ResponseDescription'] ?? 'Could not initiate M-Pesa request.';
+
             $this->logger->error("STK Push failed for Member ID: $memberId", ['response' => $stkResult]);
+
             return $this->jsonResponse($response, [
-                'status' => 'error', 
-                'message' => 'Could not initiate M-Pesa request. Please try again.'
-            ], 500);
+                'status' => 'error',
+                'message' => 'M-Pesa error: ' . $errorMessage
+            ], 400); // Changed to 400 as it's a client/service rejection, not a server crash
 
         } catch (\Exception $e) {
-            $this->logger->error("Deposit controller error: " . $e->getMessage());
-            return $this->jsonResponse($response, ['status' => 'error', 'message' => 'Internal Server Error'], 500);
+            $this->logger->error("Deposit controller exception: " . $e->getMessage());
+            return $this->jsonResponse($response, [
+                'status' => 'error',
+                'message' => 'System busy. Please try again after a few minutes.'
+            ], 503); // 503 is more accurate for a temporary service issue
         }
     }
     /**
