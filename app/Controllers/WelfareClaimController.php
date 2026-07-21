@@ -41,55 +41,8 @@ class WelfareClaimController extends Controller
 
     /**
      * Processes an STK Push initialization deposit into the Welfare Wallet (ID: 2)
-     */
-    // public function deposit(Request $request, Response $response): Response
-    // {
-    //     $data = $request->getParsedBody();
-
-    //     // 1. Validation
-    //     if (empty($data['phone']) || empty($data['amount']) || empty($data['member_id'])) {
-    //         return $this->jsonResponse($response, ['status' => 'error', 'message' => 'Missing required inputs'], 400);
-    //     }
-
-    //     $phone = (string) $data['phone'];
-    //     $amount = (float) $data['amount'];
-    //     $memberId = (int) $data['member_id'];
-    //     $welfareWalletTypeId = 2; // Welfare Wallet ID as per your wallet_types table
-
-    //     // 2. Prevent duplicate pending transactions for the same wallet
-    //     if ($this->mpesaModel->hasPendingTransaction($memberId, $welfareWalletTypeId)) {
-    //         return $this->jsonResponse($response, [
-    //             'status' => 'error', 
-    //             'message' => 'You already have a pending welfare deposit. Please complete the M-Pesa prompt.'
-    //         ], 409);
-    //     }
-
-    //     try {
-    //         // 3. Initiate STK Push via MpesaService
-    //         $stkResult = $this->mpesaService->initiateStkPush($amount, $phone, [
-    //             'member_id'      => $memberId,
-    //             'wallet_type_id' => $welfareWalletTypeId,
-    //             'account_ref'    => 'Welfare-' . $memberId
-    //         ]);
-
-    //         // 4. Handle Daraja API Response
-    //         if (isset($stkResult['CheckoutRequestID'])) {
-    //             $this->logger->info("Welfare STK Push initiated for Member ID: $memberId", ['checkout_id' => $stkResult['CheckoutRequestID']]);
-    //             return $this->jsonResponse($response, [
-    //                 'status' => 'success', 
-    //                 'message' => 'Welfare deposit initiated',
-    //                 'data' => $stkResult
-    //             ], 200);
-    //         }
-
-    //         $this->logger->error("Welfare STK Push failed for Member ID: $memberId", ['response' => $stkResult]);
-    //         return $this->jsonResponse($response, ['status' => 'error', 'message' => 'Could not initiate M-Pesa request'], 500);
-
-    //     } catch (\Exception $e) {
-    //         $this->logger->error("Welfare deposit controller error: " . $e->getMessage());
-    //         return $this->jsonResponse($response, ['status' => 'error', 'message' => 'Internal Server Error'], 500);
-    //     }
-    // }
+    */
+    
     public function deposit(Request $request, Response $response): Response
     {
         $data = $request->getParsedBody();

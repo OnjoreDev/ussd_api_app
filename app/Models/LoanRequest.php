@@ -10,8 +10,7 @@ class LoanRequest extends Model
 {
     /**
      * Create a new pending loan request
-     */
-    // In LoanRequest.php
+    */
     public function createPending(int $memberId, int $walletTypeId, int $amount): bool
     {
         // Now the table has the 'wallet_type_id' column, so this query will succeed
